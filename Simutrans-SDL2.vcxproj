@@ -38,8 +38,8 @@
     <_ProjectFileVersion>10.0.30319.1</_ProjectFileVersion>
     <OutDir>$(SolutionDir)build\SDL2\</OutDir>
     <IntDir>$(SolutionDir)build\SDL2\$(Configuration)\</IntDir>
-    <IncludePath>$(SimIncludePath);$(IncludePath)</IncludePath>
-    <LibraryPath>$(SimLibraryPath);$(LibraryPath)</LibraryPath>
+    <IncludePath>..\..\..\OpenTTD\shared\include;..\..\..\bzip\include;$(SimIncludePath);$(IncludePath)</IncludePath>
+    <LibraryPath>..\..\..\OpenTTD\win32\library;..\..\..\bzip\lib;$(SimLibraryPath);$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)'=='Release' Or '$(Configuration)'=='Stable'">
     <IncludePath>$(SimIncludePath);$(IncludePath)</IncludePath>
