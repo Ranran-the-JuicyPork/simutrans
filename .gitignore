@@ -27,3 +27,11 @@
 *.patch
 *.log
 /doxygen
+.vs/Simutrans/v15/Browse.VC.db
+.vs/Simutrans/v15/Browse.VC.opendb
+.vs/Simutrans/v15/ipch/AutoPCH/3241fa26c80fd725/WEGBAUER.ipch
+.vs/Simutrans/v15/ipch/AutoPCH/9634ad8410c9b86e/WEGBAUER.ipch
+.vs/Simutrans/v15/Solution.VC.db
+.vs/Simutrans/v15/Solution.VC.db-shm
+.vs/Simutrans/v15/Solution.VC.db-wal
+revision.h
