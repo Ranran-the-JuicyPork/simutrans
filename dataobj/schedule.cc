@@ -121,6 +121,12 @@ bool schedule_t::insert(const grund_t* gr, uint8 minimum_loading, uint8 waiting_
 		return false;
 	}
 
+	if (entries.get_count() > 0) {
+		if (entries[0].pos == gr->get_pos()) {
+			return false;
+		}
+	}
+
 	if(  is_stop_allowed(gr)  ) {
 		entries.insert_at(current_stop, schedule_entry_t(gr->get_pos(), minimum_loading, waiting_time_shift));
 		current_stop ++;
@@ -142,6 +148,12 @@ bool schedule_t::append(const grund_t* gr, uint8 minimum_loading, uint8 waiting_
 	if(entries.get_count()>=254) {
 		create_win( new news_img("Maximum 254 stops\nin a schedule!\n"), w_time_delete, magic_none);
 		return false;
+	}
+
+	if (entries.get_count() > 0) {
+		if (entries[entries.get_count()-1].pos == gr->get_pos()) {
+			return false;
+		}
 	}
 
 	if(is_stop_allowed(gr)) {
