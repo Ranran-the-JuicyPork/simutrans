@@ -29,6 +29,6 @@ scr_size gui_colorbox_t::get_max_size() const
 void gui_colorbox_t::draw(scr_coord offset)
 {
 	offset += pos;
-	display_ddd_box_clip_rgb(offset.x, offset.y, size.w, D_INDICATOR_HEIGHT, color_idx_to_rgb(MN_GREY0), color_idx_to_rgb(MN_GREY4));
+	display_ddd_box_clip_rgb(offset.x, offset.y, size.w, D_INDICATOR_HEIGHT, SYSCOL_INDICATOR_BORDER1, SYSCOL_INDICATOR_BORDER2);
 	display_fillbox_wh_clip_rgb(offset.x + 1, offset.y + 1, size.w - 2, D_INDICATOR_HEIGHT-2, color, true);
 }
