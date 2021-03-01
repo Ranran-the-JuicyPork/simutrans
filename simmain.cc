@@ -22,6 +22,7 @@
 #include "display/simview.h"
 #include "gui/simwin.h"
 #include "gui/gui_theme.h"
+#include "gui/messagebox.h"
 #include "simhalt.h"
 #include "display/simimg.h"
 #include "simcolor.h"
@@ -414,7 +415,6 @@ static void ask_language()
 }
 
 
-
 /**
  * This function will be set in the main function as the handler the runtime environment will
  * call in the case it lacks memory for new()
@@ -436,22 +436,138 @@ static const char *gimme_arg(int argc, char *argv[], const char *arg, int off)
 }
 
 
+void print_help()
+{
+	printf(
+		"\n"
+		"---------------------------------------\n"
+		"  Simutrans " VERSION_NUMBER "\n"
+		"  released " VERSION_DATE "\n"
+		"  developed\n"
+		"  by the Simutrans team.\n"
+		"\n"
+		"  Send feedback and questions to:\n"
+		"  <markus@pristovsek.de>\n"
+		"\n"
+		"  Based on Simutrans 0.84.21.2\n"
+		"  by Hansjörg Malthaner et. al.\n"
+		"---------------------------------------\n"
+		"command line parameters available: \n"
+		" -addons             loads also addons (with -objects)\n"
+		" -async              asynchronous images, only for SDL\n"
+		" -use_hw             hardware double buffering, only for SDL\n"
+		" -debug NUM          enables debugging (1..5)\n"
+		" -easyserver         set up every for server (query own IP, port forwarding)\n"
+		" -freeplay           play with endless money\n"
+		" -fullscreen         starts simutrans in fullscreen mode\n"
+		" -fps COUNT          framerate (from 5 to 100)\n"
+		" -h | -help | --help displays this help\n"
+		" -lang CODE          starts with specified language\n"
+		" -load NAME          loads savegame with name 'NAME' from Simutrans 'save' directory\n"
+		" -log                enables logging to file 'simu.log'\n"
+#ifdef SYSLOG
+		" -syslog             enable logging to syslog\n"
+		"                     mutually exclusive with -log\n"
+		" -tag TAG            sets syslog tag (default 'simutrans')\n"
+#endif
+		" -mute               mute all sounds\n"
+		" -noaddons           does not load any addon (default)\n"
+		" -nomidi             turns off background music\n"
+		" -nosound            turns off ambient sounds\n"
+		" -objects DIR_NAME/  load the pakset in specified directory\n"
+		" -pause              starts game with paused after loading\n"
+		"                     a server will pause if there are no clients\n"
+		" -res N              starts in specified resolution: \n"
+		"                      1=640x480, 2=800x600, 3=1024x768, 4=1280x1024\n"
+		" -screensize WxH     set screensize to width W and height H\n"
+		" -server [PORT]      starts program as server (for network game)\n"
+		"                     without port specified uses 13353\n"
+		" -announce           Enable server announcements\n"
+		" -autodpi            Scale for high DPI screens\n"
+		" -server_dns FQDN/IP FQDN or IP address of server for announcements\n"
+		" -server_name NAME   Name of server for announcements\n"
+		" -server_admin_pw PW password for server administration\n"
+		" -singleuser         Save everything in data directory (portable version)\n"
+#ifdef DEBUG
+		" -sizes              Show current size of some structures\n"
+#endif
+		" -startyear N        start in year N\n"
+		" -theme N            user directory containing theme files\n"
+#ifdef MULTI_THREAD
+		" -threads N          use N threads if possible\n"
+#endif
+		" -timeline           enables timeline\n"
+#if defined DEBUG || defined PROFILE
+		" -times              does some simple profiling\n"
+		" -until YEAR.MONTH   quits when MONTH of YEAR starts\n"
+#endif
+		" -use_workdir        Use current directory as data directory. If this parameter is\n"
+		"                     not present, uses the directory where the executable is located\n"
+	);
+}
+
+
+void setup_logging(int argc, char **argv)
+{
+#ifdef REVISION
+	const char *version = "Simutrans version " VERSION_NUMBER " from " VERSION_DATE " r" QUOTEME(REVISION) "\n";
+#else
+	const char *version = "Simutrans version " VERSION_NUMBER " from " VERSION_DATE "\n";
+#endif
+
+#ifdef SYSLOG
+	bool cli_syslog_enabled = (gimme_arg( argc, argv, "-syslog", 0 ) != NULL);
+	const char* cli_syslog_tag = gimme_arg( argc, argv, "-tag", 1 );
+#else
+	bool cli_syslog_enabled = false;
+	const char* cli_syslog_tag = NULL;
+#endif
+
+	env_t::verbose_debug = log_t::LEVEL_FATAL;
+
+	if(  gimme_arg(argc, argv, "-debug", 0) != NULL  ) {
+		const char *s = gimme_arg(argc, argv, "-debug", 1);
+		log_t::level_t level = log_t::LEVEL_DEBUG;
+		if(s!=NULL  &&  s[0]>='0'  &&  s[0]<='9'  ) {
+			level = (log_t::level_t)clamp(atoi(s), (int)log_t::LEVEL_FATAL, (int)log_t::LEVEL_DEBUG);
+		}
+		env_t::verbose_debug = level;
+	}
+
+	if (  cli_syslog_enabled  ) {
+		printf("syslog enabled\n");
+		if (  cli_syslog_tag  ) {
+			printf("Init logging with syslog tag: %s\n", cli_syslog_tag);
+			init_logging( "syslog", true, true, version, cli_syslog_tag );
+		}
+		else {
+			printf("Init logging with default syslog tag\n");
+			init_logging( "syslog", true, true, version, "simutrans" );
+		}
+	}
+	else if (gimme_arg(argc, argv, "-log", 0)) {
+		dr_chdir( env_t::user_dir );
+		char temp_log_name[256];
+		const char *logname = "simu.log";
+		if(  gimme_arg(argc, argv, "-server", 0)  ) {
+			const char *p = gimme_arg(argc, argv, "-server", 1);
+			int portadress = p ? atoi( p ) : 13353;
+			sprintf( temp_log_name, "simu-server%d.log", portadress==0 ? 13353 : portadress );
+			logname = temp_log_name;
+		}
+		init_logging( logname, true, true, version, NULL );
+	}
+	else if (gimme_arg(argc, argv, "-debug", 0) != NULL) {
+		init_logging( "stderr", true, true, version, NULL );
+	}
+	else {
+		init_logging(NULL, false, false, version, NULL);
+	}
+}
+
+
 int simu_main(int argc, char** argv)
 {
-	static const sint16 resolutions[][2] = {
-		{  640,  480 },
-		{  800,  600 },
-		{ 1024,  768 },
-		{ 1280, 1024 },
-		{  704,  560 } // try to force window mode with allegro
-	};
-
-	sint16 disp_width = 0;
-	sint16 disp_height = 0;
-	sint16 fullscreen = false;
-
-	uint32 quit_month = 0x7FFFFFFFu;
-
 	std::set_new_handler(sim_new_handler);
 
 	env_t::init();
@@ -461,72 +577,7 @@ int simu_main(int argc, char** argv)
 			gimme_arg(argc, argv, "-?",     0) ||
 			gimme_arg(argc, argv, "-help",  0) ||
 			gimme_arg(argc, argv, "--help", 0)) {
-		printf(
-			"\n"
-			"---------------------------------------\n"
-			"  Simutrans " VERSION_NUMBER "\n"
-			"  released " VERSION_DATE "\n"
-			"  developed\n"
-			"  by the Simutrans team.\n"
-			"\n"
-			"  Send feedback and questions to:\n"
-			"  <markus@pristovsek.de>\n"
-			"\n"
-			"  Based on Simutrans 0.84.21.2\n"
-			"  by Hansjörg Malthaner et. al.\n"
-			"---------------------------------------\n"
-			"command line parameters available: \n"
-			" -addons             loads also addons (with -objects)\n"
-			" -async              asynchronous images, only for SDL\n"
-			" -use_hw             hardware double buffering, only for SDL\n"
-			" -debug NUM          enables debugging (1..5)\n"
-			" -easyserver         set up every for server (query own IP, port forwarding)\n"
-			" -freeplay           play with endless money\n"
-			" -fullscreen         starts simutrans in fullscreen mode\n"
-			" -fps COUNT          framerate (from 5 to 100)\n"
-			" -h | -help | --help displays this help\n"
-			" -lang CODE          starts with specified language\n"
-			" -load NAME          loads savegame with name 'NAME' from Simutrans 'save' directory\n"
-			" -log                enables logging to file 'simu.log'\n"
-#ifdef SYSLOG
-			" -syslog             enable logging to syslog\n"
-			"                     mutually exclusive with -log\n"
-			" -tag TAG            sets syslog tag (default 'simutrans')\n"
-#endif
-			" -mute               mute all sounds\n"
-			" -noaddons           does not load any addon (default)\n"
-			" -nomidi             turns off background music\n"
-			" -nosound            turns off ambient sounds\n"
-			" -objects DIR_NAME/  load the pakset in specified directory\n"
-			" -pause              starts game with paused after loading\n"
-			"                     a server will pause if there are no clients\n"
-			" -res N              starts in specified resolution: \n"
-			"                      1=640x480, 2=800x600, 3=1024x768, 4=1280x1024\n"
-			" -screensize WxH     set screensize to width W and height H\n"
-			" -server [PORT]      starts program as server (for network game)\n"
-			"                     without port specified uses 13353\n"
-			" -announce           Enable server announcements\n"
-			" -autodpi            Scale for high DPI screens\n"
-			" -server_dns FQDN/IP FQDN or IP address of server for announcements\n"
-			" -server_name NAME   Name of server for announcements\n"
-			" -server_admin_pw PW password for server administration\n"
-			" -singleuser         Save everything in data directory (portable version)\n"
-#ifdef DEBUG
-			" -sizes              Show current size of some structures\n"
-#endif
-			" -startyear N        start in year N\n"
-			" -theme N            user directory containing theme files\n"
-#ifdef MULTI_THREAD
-			" -threads N          use N threads if possible\n"
-#endif
-			" -timeline           enables timeline\n"
-#if defined DEBUG || defined PROFILE
-			" -times              does some simple profiling\n"
-			" -until YEAR.MONTH   quits when MONTH of YEAR starts\n"
-#endif
-			" -use_workdir        Use current directory as data directory. If this parameter is\n"
-			"                     not present, uses the directory where the executable is located\n"
-		);
+		print_help();
 		return EXIT_SUCCESS;
 	}
 
@@ -609,64 +660,7 @@ int simu_main(int argc, char** argv)
 	dr_mkdir(SAVE_PATH);
 	dr_mkdir(SCREENSHOT_PATH);
 
-
-#ifdef REVISION
-	const char *version = "Simutrans version " VERSION_NUMBER " from " VERSION_DATE " r" QUOTEME(REVISION) "\n";
-#else
-	const char *version = "Simutrans version " VERSION_NUMBER " from " VERSION_DATE "\n";
-#endif
-
-
-	/*** Begin logging set up ***/
-
-#ifdef SYSLOG
-	bool cli_syslog_enabled = (gimme_arg( argc, argv, "-syslog", 0 ) != NULL);
-	const char* cli_syslog_tag = gimme_arg( argc, argv, "-tag", 1 );
-#else
-	bool cli_syslog_enabled = false;
-	const char* cli_syslog_tag = NULL;
-#endif
-
-	env_t::verbose_debug = 0;
-	if(  gimme_arg(argc, argv, "-debug", 0) != NULL  ) {
-		const char *s = gimme_arg(argc, argv, "-debug", 1);
-		int level = 4;
-		if(s!=NULL  &&  s[0]>='0'  &&  s[0]<='9'  ) {
-			level = atoi(s);
-		}
-		env_t::verbose_debug = level;
-	}
-
-	if (  cli_syslog_enabled  ) {
-		printf("syslog enabled\n");
-		if (  cli_syslog_tag  ) {
-			printf("Init logging with syslog tag: %s\n", cli_syslog_tag);
-			init_logging( "syslog", true, true, version, cli_syslog_tag );
-		}
-		else {
-			printf("Init logging with default syslog tag\n");
-			init_logging( "syslog", true, true, version, "simutrans" );
-		}
-	}
-	else if (gimme_arg(argc, argv, "-log", 0)) {
-		dr_chdir( env_t::user_dir );
-		char temp_log_name[256];
-		const char *logname = "simu.log";
-		if(  gimme_arg(argc, argv, "-server", 0)  ) {
-			const char *p = gimme_arg(argc, argv, "-server", 1);
-			int portadress = p ? atoi( p ) : 13353;
-			sprintf( temp_log_name, "simu-server%d.log", portadress==0 ? 13353 : portadress );
-			logname = temp_log_name;
-		}
-		init_logging( logname, true, gimme_arg(argc, argv, "-log", 0 ) != NULL, version, NULL );
-	}
-	else if (gimme_arg(argc, argv, "-debug", 0) != NULL) {
-		init_logging( "stderr", true, gimme_arg(argc, argv, "-debug", 0 ) != NULL, version, NULL );
-	}
-	else {
-		init_logging(NULL, false, false, version, NULL);
-	}
-	/*** End logging set up ***/
+	setup_logging(argc, argv);
 
 	// now read last setting (might be overwritten by the tab-files)
 	{
@@ -690,15 +684,24 @@ int simu_main(int argc, char** argv)
 		}
 	}
 
+	sint16 disp_width = 0;
+	sint16 disp_height = 0;
+	sint16 fullscreen = false;
+
 	// continue parsing
 	dr_chdir( env_t::data_dir );
 	if(  found_simuconf  ) {
 		if(simuconf.open(path_to_simuconf)) {
 			// we do not allow to change the global font name
 			std::string old_fontname = env_t::fontname;
+			std::string old_soundfont_filename = env_t::soundfont_filename;
 			printf("parse_simuconf() at config/simuconf.tab: ");
 			env_t::default_settings.parse_simuconf( simuconf, disp_width, disp_height, fullscreen, env_t::objfilename );
 			simuconf.close();
+			if(  (old_soundfont_filename.length() > 0)  &&  (strcmp( old_soundfont_filename.c_str(), "Error" ) != 0)  ) {
+				// We had a valid soundfont saved by the user, let's restore it
+				env_t::soundfont_filename = old_soundfont_filename;
+			}
 			env_t::fontname = old_fontname;
 		}
 	}
@@ -804,6 +807,14 @@ int simu_main(int argc, char** argv)
 		show_sizes();
 	}
 #endif
+
+	static const sint16 resolutions[][2] = {
+		{  640,  480 },
+		{  800,  600 },
+		{ 1024,  768 },
+		{ 1280, 1024 },
+		{  704,  560 } // try to force window mode with allegro
+	};
 
 	// likely only the program without graphics was downloaded
 	if (gimme_arg(argc, argv, "-res", 0) != NULL) {
@@ -944,31 +955,16 @@ int simu_main(int argc, char** argv)
 	display_show_pointer(1);
 
 	// if no object files given, we ask the user
-	if(  env_t::objfilename.empty()  ) {
+	while (  env_t::objfilename.empty()  ) {
 		ask_objfilename();
+
 		if(  env_t::quit_simutrans  ) {
 			simgraph_exit();
 			return EXIT_SUCCESS;
 		}
-		if(  env_t::objfilename.empty()  ) {
+		else if (env_t::objfilename.empty()) {
 			// try to download missing paks
 			install_objfilename(); // all other
-			ask_objfilename();
-			if(  env_t::quit_simutrans  ) {
-				simgraph_exit();
-				return EXIT_SUCCESS;
-			}
-			// still nothing?
-			if(  env_t::objfilename.empty()  ) {
-				// nothing to be loaded => exit
-				dr_fatal_notify(
-					"*** No pak set found ***\n"
-					"\n"
-					"Most likely, you have no pak set installed.\n"
-					"Please download and install a pak set (graphics).\n");
-				simgraph_exit();
-				return EXIT_FAILURE;
-			}
 		}
 	}
 
@@ -981,11 +977,15 @@ int simu_main(int argc, char** argv)
 
 		FILE* const f = dr_fopen(buf, "r");
 		if(  !f  ) {
-			dr_fatal_notify(
-				"*** No pak set found ***\n"
-				"\n"
-				"Most likely, you have no pak set installed.\n"
-				"Please download and install a pak set (graphics).\n");
+			cbuffer_t errmsg;
+			errmsg.printf(
+				"The file 'ground.Outside.pak' was not found in\n"
+				"'%s%s'.\n"
+				"This file is required for a valid pak set (graphics).\n"
+				"Please install and select a valid pak set.",
+				env_t::data_dir, env_t::objfilename.c_str());
+
+			dr_fatal_notify(errmsg);
 			simgraph_exit();
 			return EXIT_FAILURE;
 		}
@@ -1297,16 +1297,22 @@ int simu_main(int argc, char** argv)
 		dbg->message("simu_main()","Reading midi data ...");
 		char pak_dir[PATH_MAX];
 		sprintf( pak_dir, "%s%s", env_t::data_dir, env_t::objfilename.c_str() );
-		if(  !midi_init(pak_dir)  ) {
-			if(  !midi_init(env_t::user_dir)  ) {
-				if(  !midi_init(env_t::data_dir)  ) {
-					dbg->message("simu_main()","Midi disabled ...");
-				}
-			}
+		if(  midi_init( pak_dir )  ||  midi_init( env_t::user_dir )  ||  midi_init( env_t::data_dir )  ) {
+			midi_set_mute( false );
+		}
+		else {
+			midi_set_mute( true );
+			dbg->message("simu_main()","Midi disabled ...");
 		}
 		if(gimme_arg(argc, argv, "-nomidi", 0)) {
 			midi_set_mute(true);
 		}
+#ifdef USE_FLUIDSYNTH_MIDI
+		// Audio is ok, but we failed to find a soundfont
+		if(  strcmp( env_t::soundfont_filename.c_str(), "Error" ) == 0  ) {
+			midi_set_mute( true );
+		}
+#endif
 	}
 	else {
 		dbg->message("simu_main()","Midi disabled ...");
@@ -1427,6 +1433,9 @@ int simu_main(int argc, char** argv)
 
 	welt->set_fast_forward(false);
 	baum_t::recalc_outline_color();
+
+	uint32 quit_month = 0x7FFFFFFFu;
+
 #if defined DEBUG || defined PROFILE
 	// do a render test?
 	if (gimme_arg(argc, argv, "-times", 0) != NULL) {
@@ -1484,6 +1493,11 @@ int simu_main(int argc, char** argv)
 	if(  !env_t::networkmode  &&  !env_t::server  &&  new_world  ) {
 		welt->get_message()->clear();
 	}
+#ifdef USE_FLUIDSYNTH_MIDI
+	if(  strcmp( env_t::soundfont_filename.c_str(), "Error" ) == 0  ) {
+		create_win( 0,0, new news_img("No soundfont found!\n\nMusic won't play until you load a soundfont from the sound options menu."), w_info, magic_none );
+	}
+#endif
 	while(  !env_t::quit_simutrans  ) {
 		// play next tune?
 		check_midi();

@@ -745,6 +745,11 @@ DBG_MESSAGE("tool_remover()", "removing way");
 		// tunnel without way: delete anything else
 		if(  !gr->hat_wege()  ) {
 			gr->obj_loesche_alle(player);
+			if (gr->get_typ() == boden_t::tunnelboden && gr->ist_karten_boden()) {
+				grund_t* gr_new = new boden_t(gr->get_pos(), gr->get_grund_hang());
+				welt->access(gr_new->get_pos().get_2d())->kartenboden_setzen(gr_new);
+				gr = gr_new;
+			}
 		}
 	}
 
@@ -2151,18 +2156,20 @@ const char *tool_plant_tree_t::work( player_t *player, koord3d pos )
 		bool check_climates = true;
 		bool random_age = false;
 		if(default_param==NULL  ||  strlen(default_param)==0) {
-			desc = baum_t::random_tree_for_climate( welt->get_climate( k ) );
+			desc = tree_builder_t::random_tree_for_climate( welt->get_climate( k ) );
 		}
 		else {
 			// parse default_param: bbdesc_nr b=1 ignore climate b=1 random age
 			check_climates = default_param[0]=='0';
 			random_age = default_param[1]=='1';
-			desc = baum_t::find_tree(default_param+3);
+			desc = tree_builder_t::find_tree(default_param+3);
 		}
-		if(desc  &&  baum_t::plant_tree_on_coordinate( k, desc, check_climates, random_age )  ) {
+
+		if(desc  &&  tree_builder_t::plant_tree_on_coordinate( k, desc, check_climates, random_age )  ) {
 			player_t::book_construction_costs(player, cost, k, ignore_wt);
 			return NULL;
 		}
+
 		return "";
 	}
 	return NULL;
@@ -3370,6 +3377,12 @@ const char *tool_wayremover_t::do_work( player_t *player, const koord3d &start, 
 				}
 				else {
 					can_delete &= gr->remove_everything_from_way(player,wt,rem);
+					if (gr->get_typ() == grund_t::tunnelboden  &&  !gr->hat_wege()  ) {
+						// tunnel portal has been removed
+						grund_t* gr_new = new boden_t(gr->get_pos(), gr->get_grund_hang());
+						welt->access(gr->get_pos().get_2d())->kartenboden_setzen(gr_new);
+						gr = gr_new;
+					}
 				}
 			}
 			else {
@@ -6116,7 +6129,7 @@ const char *tool_forest_t::do_work( player_t *player, const koord3d &start, cons
 	nw.x = min(start.x, end.x)+(wh.x/2);
 	nw.y = min(start.y, end.y)+(wh.y/2);
 
-	sint64 costs = baum_t::create_forest( nw, wh, 0, 0, welt->get_size().x, welt->get_size().y );
+	sint64 costs = tree_builder_t::create_forest( nw, wh, 0, 0, welt->get_size().x, welt->get_size().y );
 	player_t::book_construction_costs(player, costs * welt->get_settings().cst_remove_tree, end.get_2d(), ignore_wt);
 
 	return NULL;
@@ -6835,20 +6848,24 @@ bool tool_quit_t::init( player_t * )
 
 bool tool_screenshot_t::init( player_t * )
 {
-	if(  is_ctrl_pressed()  ) {
-		if(  const gui_frame_t * topwin = win_get_top()  ) {
-			const scr_coord k = win_get_pos(topwin);
-			const scr_size size = topwin->get_windowsize();
-			display_snapshot( k.x, k.y, size.w, size.h );
-		}
-		else {
-			display_snapshot( 0, 0, display_get_width(), display_get_height() );
-		}
+	bool ok;
+	const scr_rect screen_area = scr_rect(0, 0, display_get_width(), display_get_height());
+	const gui_frame_t *topwin = win_get_top();
+
+	if(  is_ctrl_pressed()  &&  topwin != NULL  ) {
+		ok = display_snapshot( scr_rect(win_get_pos(topwin), topwin->get_windowsize()) );
 	}
 	else {
-		display_snapshot( 0, 0, display_get_width(), display_get_height() );
+		ok = display_snapshot( screen_area );
 	}
-	create_win( new news_img("Screenshot\ngespeichert.\n"), w_time_delete, magic_none);
+
+	if (ok) {
+		create_win( new news_img("Screenshot\ngespeichert.\n"), w_time_delete, magic_none);
+	}
+	else {
+		create_win( new news_img("Could not\ncreate screenshot!\n"), w_time_delete, magic_none);
+	}
+
 	return false;
 }
 
