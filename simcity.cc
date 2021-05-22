@@ -359,7 +359,7 @@ bool stadt_t::cityrules_init(const std::string &objfilename)
 		}
 
 		// put rule into memory
-		const uint8 offset = (7 - (uint)size) / 2;
+		const uint8 offset = (7 - (uint8)size) / 2;
 		for (uint y = 0; y < size; y++) {
 			for (uint x = 0; x < size; x++) {
 				const char flag = rule[x + y * (size + 1)];
@@ -403,7 +403,7 @@ bool stadt_t::cityrules_init(const std::string &objfilename)
 		}
 
 		// put rule into memory
-		const uint8 offset = (7 - (uint)size) / 2;
+		const uint8 offset = (7 - (uint8)size) / 2;
 		for (uint y = 0; y < size; y++) {
 			for (uint x = 0; x < size; x++) {
 				const char flag = rule[x + y * (size + 1)];
@@ -3223,8 +3223,8 @@ void stadt_t::renovate_city_building(gebaeude_t *gb)
 	// since we handle buildings larger than (1x1) we test all periphery
 	koord lu = k - koord( 1, 1 );
 	koord rd = k + minsize;
-	for( KOORD_VAL x = lu.x; x<=rd.x; x++ ) {
-		for( KOORD_VAL y = lu.y; y<=rd.y; y++ ) {
+	for( sint16 x = lu.x; x<=rd.x; x++ ) {
+		for( sint16 y = lu.y; y<=rd.y; y++ ) {
 			if(  koord(x,y)!=k  ) {
 				if(  grund_t *gr = welt->lookup_kartenboden(x,y)  ) {
 					if(  gebaeude_t const* const testgb = gr->find<gebaeude_t>()  ) {

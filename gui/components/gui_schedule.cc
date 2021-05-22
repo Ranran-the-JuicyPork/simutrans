@@ -105,7 +105,9 @@ public:
 			add_component(&down);
 		}
 
-		del.init( button_t::square_automatic, "" );
+		del.init( button_t::imagebox, NULL );
+		del.set_image( skinverwaltung_t::gadget->get_image_id(SKIN_GADGET_CLOSE) );
+		del.set_size( gui_theme_t::gui_arrow_left_size );
 		del.add_listener( this );
 		del.set_tooltip( "Delete the current stop" );
 		add_component( &del );
@@ -174,21 +176,20 @@ public:
 
 	bool infowin_event(const event_t *ev) OVERRIDE
 	{
-		if( ev->ev_class == EVENT_RELEASE ) {
-			if(  IS_RIGHTRELEASE(ev)  ) {
-				// just center on it
-				welt->get_viewport()->change_world_position( entry.pos );
-			}
-			else {
-				set_focus( this );
-				if( !gui_aligned_container_t::infowin_event( ev ) && stop.getroffen( ev->cx, ev->cy ) ) {
-					// not handled, so we make i aktive
-					call_listeners( number );
-				}
+		if(  IS_RIGHTRELEASE(ev)  ) {
+			// just center on it
+			welt->get_viewport()->change_world_position( entry.pos );
+			return true;
+		}
+		else if(ev->button_state==1  ){
+			set_focus( this );
+			if( !gui_aligned_container_t::infowin_event( ev ) && stop.getroffen( ev->cx, ev->cy ) ) {
+				// not handled, so we make i aktive
+				call_listeners( number );
 			}
 			return true;
 		}
-		return false;
+		return gui_aligned_container_t::infowin_event(ev);
 	}
 };
 
@@ -384,7 +385,7 @@ gui_schedule_t::gui_schedule_t() :
 	set_table_layout(1,0);
 
 	// loading level and waiting time
-	loading_details = add_table( 3, 1 );
+	loading_details = add_table( 4, 1 );
 	loading_details->set_margin( scr_size(D_MARGIN_LEFT,0), scr_size(D_MARGIN_RIGHT,0) );
 	{
 		add_component(&lb_wait);
@@ -395,6 +396,8 @@ gui_schedule_t::gui_schedule_t() :
 		numimp_load.set_increment_mode( gui_numberinput_t::PROGRESS );
 		numimp_load.add_listener(this);
 		add_component(&numimp_load);
+
+		add_component(&lb_departure_time);
 
 		departure.set_rigid(true);
 		departure.add_listener(this);
@@ -447,7 +450,6 @@ gui_schedule_t::~gui_schedule_t()
 void gui_schedule_t::init(schedule_t* schedule_, player_t* player, convoihandle_t cnv, linehandle_t lin)
 {
 	if( old_schedule != schedule_ ) {
-
 		if( old_schedule ) {
 			stats->highlight_schedule( false );
 			update_tool( false );
@@ -456,14 +458,13 @@ void gui_schedule_t::init(schedule_t* schedule_, player_t* player, convoihandle_
 		}
 
 		// initialization
-		this->old_schedule = schedule_;
 		this->convoi_mode = cnv;
 		this->line_mode = lin;
 		this->player = player;
 		current_schedule_rotation = welt->get_settings().get_rotation();
 
 		// prepare editing
-		schedule = old_schedule->copy();
+		schedule = schedule_->copy();
 
 		make_return = (schedule->get_waytype() == road_wt || schedule->get_waytype() == air_wt || schedule->get_waytype() == water_wt);
 		if(  make_return  ) {
@@ -487,6 +488,8 @@ void gui_schedule_t::init(schedule_t* schedule_, player_t* player, convoihandle_
 		bt_return.enable( !no_editing );
 
 		update_selection();
+
+		this->old_schedule = schedule_;
 	}
 	else {
 		schedule->set_current_stop(schedule_->get_current_stop());
@@ -525,6 +528,7 @@ void gui_schedule_t::update_selection()
 	lb_wait.set_visible(false);
 	numimp_load.set_visible(false);
 	departure.set_visible(false);
+	lb_departure_time.set_visible(false);
 
 	if(  !schedule->empty()  ) {
 		schedule->set_current_stop( min(schedule->get_count()-1,schedule->get_current_stop()) );
@@ -534,14 +538,11 @@ void gui_schedule_t::update_selection()
 		if(  haltestelle_t::get_halt(schedule->entries[current_stop].pos, player).is_bound()  ) {
 
 			lb_wait.set_visible(true);
-// 			if( schedule->entries[ current_stop ].is_absolute_departure() ) {
-// 				departure.set_visible(true);
-// 			}
-// 			else {
-				numimp_load.set_visible(true);
-				numimp_load.set_value( schedule->entries[ current_stop ].minimum_loading );
-				departure.set_visible(true);
-// 			}
+			lb_departure_time.set_visible(true);
+			lb_departure_time.set_text(schedule->entries[current_stop].minimum_loading > 0 ? "Depart after" : "Depart at");
+			numimp_load.set_visible(true);
+			numimp_load.set_value( schedule->entries[ current_stop ].minimum_loading );
+			departure.set_visible(true);
 			departure.set_ticks( schedule->entries[ current_stop ].waiting_time );
 		}
 		else {
@@ -577,7 +578,7 @@ bool gui_schedule_t::action_triggered( gui_action_creator_t *comp, value_t p)
 	}
 	else if(comp == &departure) {
 		if(!schedule->empty()) {
-			schedule->entries[schedule->get_current_stop()].waiting_time = p.i;
+			schedule->entries[schedule->get_current_stop()].waiting_time = (uint16)p.i;
 			update_selection();
 		}
 	}
@@ -593,7 +594,10 @@ bool gui_schedule_t::action_triggered( gui_action_creator_t *comp, value_t p)
 			update_selection();
 		}
 	}
-	update_tool( true );
+	// do not reset tool during initialisation
+	if (old_schedule) {
+		update_tool(true);
+	}
 	return true;
 }
 

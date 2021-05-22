@@ -80,7 +80,7 @@ public:
 	char const* get_tooltip(player_t const*) const OVERRIDE{ return translator::translate("Einstellungen aendern"); }
 	bool is_selected() const OVERRIDE{ return win_get_magic(magic_optionen_gui_t); }
 	bool init(player_t*) OVERRIDE{
-		create_win(240, 120, new optionen_gui_t(), w_info, magic_optionen_gui_t);
+		create_win(-1, -1, new optionen_gui_t(), w_info, magic_optionen_gui_t, true);
 		return false;
 	}
 	bool exit(player_t*) OVERRIDE{ destroy_win(magic_optionen_gui_t); return false; }
@@ -512,7 +512,7 @@ public:
 	image_id get_icon(player_t *) const OVERRIDE { return tree_builder_t::has_trees() ? icon : IMG_EMPTY; }
 	bool is_selected() const OVERRIDE{ return win_get_magic(magic_edit_tree); }
 	bool init(player_t* player) OVERRIDE{
-		if (tree_builder_t::has_trees() > 0 && !is_selected()) {
+		if(  tree_builder_t::has_trees()  && !is_selected()  ) {
 			create_win(new baum_edit_frame_t(player), w_info, magic_edit_tree);
 		}
 		return false;

@@ -241,7 +241,7 @@ convoi_frame_t::convoi_frame_t() :
 	scrolly->set_maximize( true );
 
 	tabs.init_tabs(scrolly);
-	for(  int i = 0;  i < tabs.get_count();  i++  ) {
+	for(  uint32 i = 0;  i < tabs.get_count();  i++  ) {
 		if(current_wt == tabs.get_tab_waytype(i)) {
 			tabs.set_active_tab_index(i);
 			break;
@@ -333,8 +333,8 @@ void convoi_frame_t::rdwr( loadsave_t *file )
 		file->rdwr_byte( good_nr );
 		if (good_nr > 0) {
 			FOR( slist_tpl<const goods_desc_t *>, const i, *waren_filter ) {
-				uint8 catg_idx = i->get_catg_index();
-				file->rdwr_byte(catg_idx);
+				char *name = const_cast<char *>(i->get_name());
+				file->rdwr_str(name,256);
 			}
 		}
 	}
@@ -344,9 +344,11 @@ void convoi_frame_t::rdwr( loadsave_t *file )
 		if( good_nr > 0 ) {
 			static slist_tpl<const goods_desc_t *>waren_filter_rd;
 			for( sint16 i = 0; i < good_nr; i++ ) {
-				uint8 catg_idx;
-				file->rdwr_byte(catg_idx);
-				waren_filter_rd.append( goods_manager_t::get_info_catg(catg_idx) );
+				char name[256];
+				file->rdwr_str(name, lengthof(name));
+				if (const goods_desc_t *gd = goods_manager_t::get_info(name)) {
+					waren_filter_rd.append(gd);
+				}
 			}
 			waren_filter = &waren_filter_rd;
 		}

@@ -369,7 +369,7 @@ const char *tool_query_t::work( player_t *, koord3d pos )
 		const uint8 max_stages = 4;
 		for(uint8 stage = 0; stage<max_stages; stage++) {
 
-			int old_count = win_get_open_count();
+			uint32 old_count = win_get_open_count();
 
 			switch (reverse ? max_stages-1-stage: stage) {
 				case 0: { // halts
@@ -391,7 +391,7 @@ const char *tool_query_t::work( player_t *, koord3d pos )
 					break;
 				case 2: { // objects
 					convoihandle_t cnv;
-					for (size_t n = gr->get_top(); n-- != 0;) {
+					for (uint8 n = gr->get_top(); n-- != 0;) {
 						obj_t *obj = gr->obj_bei(reverse ? gr->get_top()-1-n : n);
 
 						if (vehicle_t* veh = dynamic_cast<vehicle_t*>(obj)) {
@@ -2142,7 +2142,7 @@ const char *tool_plant_tree_t::work( player_t *player, koord3d pos )
 	grund_t *gr = welt->lookup_kartenboden(k);
 	if(gr) {
 		// check if trees are allowed
-		if(  welt->get_settings().get_tree()==0  &&  !player->is_public_service()  ) {
+		if(  welt->get_settings().get_tree_distribution()==settings_t::TREE_DIST_NONE  &&  !player->is_public_service()  ) {
 			return NOTICE_NO_TREES;
 		}
 
@@ -2250,6 +2250,10 @@ static const char *tool_schedule_insert_aux(karte_t *welt, player_t *player, koo
 		// check for right way type
 		if(!schedule->is_stop_allowed(bd)) {
 			return schedule->get_error_msg();
+		}
+		// stored in minivec, so we have to avoid adding too many
+		if(  schedule->entries.get_count()>=254  ) {
+			return "Maximum 254 stops\nin a schedule!\n";
 		}
 		// and check for ownership
 		if(  !bd->is_halt()  ) {
@@ -6425,6 +6429,76 @@ const char *tool_make_stop_public_t::work( player_t *player, koord3d p )
 	// target halt must exist
 	halthandle_t halt = haltestelle_t::get_halt(p,player);
 	if(  !halt.is_bound()  ) {
+		if(welt->get_settings().get_disable_make_way_public()) {
+			return NOTICE_DISABLED_PUBLIC_WAY;
+		}
+
+		// not a halt to merge => just change way ownership
+		if (grund_t* gr = welt->lookup(p)) {
+
+			if (gr->get_typ() == grund_t::brueckenboden) {
+				return NOTICE_UNSUITABLE_GROUND;
+			}
+
+			for (int j = 0; j < 2; j++) {
+				if (weg_t* w = gr->get_weg_nr(j)) {
+					// no public way with signs
+					if (w->has_sign()) {
+						return NOTICE_UNSUITABLE_GROUND;
+					}
+				}
+			}
+
+			bool has_been_announced = false;
+			for (int j = 0; j < 2; j++) {
+				if (weg_t* w = gr->get_weg_nr(j)) {
+					// change ownership of way...
+					player_t* wplayer = w->get_owner();
+					if (player == wplayer) {
+						w->set_owner(welt->get_public_player());
+						w->set_flag(obj_t::dirty);
+						sint32 cost = w->get_desc()->get_maintenance();
+						// of tunnel...
+						if (tunnel_t* t = gr->find<tunnel_t>()) {
+							t->set_owner(welt->get_public_player());
+							t->set_flag(obj_t::dirty);
+							cost = t->get_desc()->get_maintenance();
+						}
+						waytype_t const financetype = w->get_desc()->get_finance_waytype();
+						player_t::add_maintenance(wplayer, -cost, financetype);
+						player_t::add_maintenance(welt->get_public_player(), cost, financetype);
+						// multiplayer notification message
+						if (env_t::networkmode && !has_been_announced) {
+							cbuffer_t buf;
+							buf.printf(translator::translate("(%s) now public way."), w->get_pos().get_str());
+							welt->get_message()->add_message(buf, w->get_pos().get_2d(), message_t::ai, PLAYER_FLAG | player->get_player_nr(), IMG_EMPTY);
+							has_been_announced = true; // one message is enough
+						}
+						cost = -welt->scale_with_month_length(cost * welt->get_settings().cst_make_public_months);
+						player_t::book_construction_costs(wplayer, cost, koord::invalid, financetype);
+					}
+				}
+			}
+
+			// make way object public if any suitable
+			for (uint8 i = 1; i < gr->get_top(); i++) {
+				if (wayobj_t* const wo = obj_cast<wayobj_t>(gr->obj_bei(i))) {
+					player_t* woplayer = wo->get_owner();
+					if (player == woplayer) {
+						sint32 const cost = wo->get_desc()->get_maintenance();
+						// change ownership
+						wo->set_owner(welt->get_public_player());
+						wo->set_flag(obj_t::dirty);
+						waytype_t const financetype = wo->get_desc()->get_waytype();
+						player_t::add_maintenance(woplayer, -cost, financetype);
+						player_t::add_maintenance(welt->get_public_player(), cost, financetype);
+						player_t::book_construction_costs(woplayer, cost, koord::invalid, financetype);
+					}
+				}
+			}
+			return 0;
+		}
+		// no ground found?!?
 		return NOTICE_UNSUITABLE_GROUND;
 	}
 
@@ -7163,7 +7237,7 @@ bool tool_change_line_t::init( player_t *player )
 
 				line->get_schedule()->finish_editing(); // just in case ...
 				if(  can_use_gui()  ) {
-					player->simlinemgmt.show_lineinfo( player, line );
+					player->simlinemgmt.show_lineinfo( player, line, 0 );
 				}
 			}
 			break;
@@ -7347,7 +7421,7 @@ bool tool_change_depot_t::init( player_t *player )
 {
 	char tool=0;
 	koord pos2d;
-	sint16 z;
+	sint8 z;
 	uint16 convoi_id;
 
 	// skip the rest of the command
@@ -7355,7 +7429,7 @@ bool tool_change_depot_t::init( player_t *player )
 	while(  *p  &&  *p<=' '  ) {
 		p++;
 	}
-	sscanf( p, "%c,%hi,%hi,%hi,%hi", &tool, &pos2d.x, &pos2d.y, &z, &convoi_id );
+	sscanf( p, "%c,%hi,%hi,%hhi,%hi", &tool, &pos2d.x, &pos2d.y, &z, &convoi_id );
 
 	koord3d pos(pos2d, z);
 
@@ -7391,7 +7465,7 @@ bool tool_change_depot_t::init( player_t *player )
 
 			depot_frame_t *depot_frame = dynamic_cast<depot_frame_t *>(win_get_magic( (ptrdiff_t)depot ));
 			if(  can_use_gui()  ) {
-				player->simlinemgmt.show_lineinfo( player, selected_line );
+				player->simlinemgmt.show_lineinfo( player, selected_line, 0 );
 			}
 
 			if(  depot_frame  ) {
@@ -7622,8 +7696,9 @@ bool tool_change_player_t::init( player_t *player_in)
 bool tool_change_traffic_light_t::init( player_t *player )
 {
 	koord pos2d;
-	sint16 z, ns, ticks;
-	if(  5!=sscanf( default_param, "%hi,%hi,%hi,%hi,%hi", &pos2d.x, &pos2d.y, &z, &ns, &ticks )  ) {
+	sint8 z;
+	sint16 ns, ticks;
+	if(  5!=sscanf( default_param, "%hi,%hi,%hhi,%hi,%hi", &pos2d.x, &pos2d.y, &z, &ns, &ticks )  ) {
 		return false;
 	}
 	koord3d pos(pos2d, z);
@@ -7718,7 +7793,8 @@ bool tool_rename_t::init(player_t *player)
 		case 'm':
 		case 'f': {
 			koord pos2d;
-			if(  3!=sscanf( p, "%hi,%hi,%hi", &pos2d.x, &pos2d.y, &id )  ) {
+			sint8 z;
+			if(  3!=sscanf( p, "%hi,%hi,%hhi", &pos2d.x, &pos2d.y, &z )  ) {
 				dbg->error( "tool_rename_t::init", "no position given for marker/factory! (%s)", default_param );
 				return false;
 			}
@@ -7728,7 +7804,7 @@ bool tool_rename_t::init(player_t *player)
 			}
 			while(  *p>0  &&  *p++!=','  ) {
 			}
-			pos = koord3d(pos2d, id);
+			pos = koord3d(pos2d, z);
 			id = 0;
 			break;
 		}
@@ -7820,6 +7896,55 @@ bool tool_rename_t::init(player_t *player)
 	return false;
 }
 
+bool tool_recolour_t::init(player_t *)
+{
+	uint8 id = 0;
+
+	// skip the rest of the command
+	const char *p = default_param;
+	const char what = *p++;
+	switch(  what  ) {
+		case '1':
+		case '2':
+			id = atoi(p);
+			while(  *p>0  &&  *p++!=','  ) {
+			}
+			break;
+		default:
+			dbg->error( "tool_recolour_t::init", "illegal request! (%s)", default_param );
+			return false;
+	}
+
+	const uint8 colour = atoi(p);
+
+	// now for action ...
+	switch(  what  )
+	{
+		case '1': // Change player colour 1
+		{
+			if(welt->get_player(id))
+			{
+				welt->get_player(id)->set_player_color(colour, welt->get_player(id)->get_player_color2());
+				return false;
+			}
+			break;
+		}
+
+		case '2': // Change player colour 2
+		{
+			if(welt->get_player(id))
+			{
+				welt->get_player(id)->set_player_color( welt->get_player(id)->get_player_color1(), colour);
+				return false;
+			}
+			break;
+		}
+	}
+
+	// we are only getting here, if we could not process this request
+	dbg->error( "wkz_recolour_t::init", "could not perform (%s)", default_param );
+	return false;
+}
 
 /*
  * Add a message to the message queue

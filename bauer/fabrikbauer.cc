@@ -54,7 +54,7 @@ static void add_factory_to_fab_map(karte_t const* const welt, fabrik_t const* co
 	koord3d      const& pos     = fab->get_pos();
 	sint16       const  spacing = welt->get_settings().get_min_factory_spacing();
 	building_desc_t const& bdsc  = *fab->get_desc()->get_building();
-	sint16       const  rotate  = fab->get_rotate();
+	uint8        const  rotate  = fab->get_rotate();
 	sint16       const  start_y = max(0, pos.y - spacing);
 	sint16       const  start_x = max(0, pos.x - spacing);
 	sint16       const  end_y   = min(welt->get_size().y - 1, pos.y + bdsc.get_y(rotate) + spacing);
@@ -93,7 +93,7 @@ void init_fab_map( karte_t *welt )
  * @param x,y world position, needs to be valid coordinates
  * @returns true, if factory coordinate
  */
-inline bool is_factory_at( sint16 x, sint16 y)
+inline bool is_factory_at(sint16 x, sint16 y)
 {
 	uint32 idx = (fab_map_w*y)+(x/8);
 	return idx < fab_map.get_count()  &&  (fab_map[idx]&(1<<(x%8)))!=0;
@@ -154,7 +154,7 @@ public:
 						return false;
 					}
 					// check for trees unless the map was generated without trees
-					if(  site==factory_desc_t::forest  &&  welt->get_settings().get_tree()>0  &&  condmet < mincond  ) {
+					if(  site==factory_desc_t::forest  &&  welt->get_settings().get_tree_distribution()!=settings_t::TREE_DIST_NONE  &&  condmet < mincond  ) {
 						for(uint8 i=0; i< gr->get_top(); i++) {
 							if (gr->obj_bei(i)->get_typ() == obj_t::baum) {
 								condmet++;
@@ -177,7 +177,7 @@ public:
 								weg_t* river = gr->get_weg(water_wt);
 								if (river  &&  river->get_desc()->get_styp()==type_river) {
 									condmet++;
-									printf("Found river near %s\n", pos.get_str());
+									DBG_DEBUG("factory_site_searcher_t::is_area_ok()", "Found river near %s", pos.get_str());
 								}
 								break;
 							}
@@ -438,7 +438,7 @@ void factory_builder_t::distribute_attractions(int max_number)
 	}
 
 	// very fast, so we do not bother updating progress bar
-	printf("Distributing %i tourist attractions ...\n",max_number);fflush(NULL);
+	dbg->message("factory_builder_t::distribute_attractions()", "Distributing %i tourist attractions", max_number);
 
 	int retrys = max_number*4;
 	while(current_number<max_number  &&  retrys-->0) {
@@ -988,7 +988,7 @@ int factory_builder_t::increase_industry_density( bool tell_me )
 	}
 
 	// first: do we have to continue unfinished factory chains?
-	if(  !ware_needed.empty()  ) {
+	if(  !ware_needed.empty()  && last_built_consumer  ) {
 
 		int org_rotation = -1;
 		// rotate until we can save it if one of the factories is non-rotate-able ...

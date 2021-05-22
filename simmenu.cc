@@ -175,6 +175,7 @@ tool_t *create_simple_tool(int toolnr)
 		case TOOL_HIDE_UNDER_CURSOR:    tool = new tool_hide_under_cursor_t();    break;
 		case TOOL_MOVE_MAP:             tool = new tool_move_map_t();             break;
 		case TOOL_ROLLUP_ALL_WIN:       tool = new tool_rollup_all_win_t();       break;
+		case TOOL_RECOLOUR_TOOL:		tool = new tool_recolour_t();			  break;
 		case UNUSED_TOOL_ADD_MESSAGE: // fall-through - intended!!!111elf
 		case UNUSED_WKZ_PWDHASH_TOOL:
 			dbg->warning("create_simple_tool()","deprecated tool [%i] requested", toolnr);
@@ -263,7 +264,7 @@ tool_t *create_tool(int toolnr)
  */
 void general_tool_get_desc_builder(uint16 id, const char *param_str, const obj_desc_timelined_t* &desc, tool_t* &tool)
 {
-	if (  id & (SIMPLE_TOOL | DIALOGE_TOOL) ) {
+	if (  id & ((uint16)SIMPLE_TOOL | (uint16)DIALOGE_TOOL) ) {
 		return;
 	}
 	id = id & (~GENERAL_TOOL);
@@ -332,7 +333,7 @@ void set_defaults_general_tool(tool_t *tool, const char *param_str)
  * will still be applied - show buttons with icons regardless of
  * whether the objects they build are available or not.
  */
-bool check_tool_availability(const tool_t *tool, uint64 time)
+bool check_tool_availability(const tool_t *tool, uint16 time)
 {
 	if (  tool  ==  NULL  ) {
 		return true;

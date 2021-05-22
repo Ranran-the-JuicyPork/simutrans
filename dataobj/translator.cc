@@ -73,20 +73,6 @@ const translator::lang_info* translator::get_langs()
 }
 
 
-#ifdef need_dump_hashtable
-// diagnosis
-static void dump_hashtable(stringhashtable_tpl<const char*>* tbl)
-{
-	printf("keys\n====\n");
-	tbl->dump_stats();
-	printf("entries\n=======\n");
-	FOR(stringhashtable_tpl<char const*>, const& i, *tbl) {
-		printf("%s\n", i.object);
-	}
-	fflush(NULL);
-}
-#endif
-
 /* first two file functions needed in connection with utf */
 
 /**
@@ -498,10 +484,6 @@ bool translator::load(const string &path_to_pakset)
 		dr_chdir( env_t::data_dir );
 	}
 
-#if DEBUG>=4
-	dump_hashtable(&compatibility);
-#endif
-
 	// use english if available
 	current_langinfo = get_lang_by_iso("en");
 
@@ -695,6 +677,32 @@ const char *translator::get_short_date(uint16 year, uint16 month)
 	return sdate;
 }
 
+
+const char* translator::get_month_date(uint16 month, uint16 day)
+{
+	char const* const month_ = get_month_name(month);
+	char const* const day_sym = strcmp("DAY_SYMBOL", translate("DAY_SYMBOL")) ? translate("DAY_SYMBOL") : "";
+	static char date[256];
+	switch (env_t::show_month) {
+	case env_t::DATE_FMT_GERMAN:
+	case env_t::DATE_FMT_GERMAN_NO_SEASON:
+		sprintf(date, "%d. %s ", day, month_);
+		break;
+	case env_t::DATE_FMT_US:
+	case env_t::DATE_FMT_US_NO_SEASON:
+		sprintf(date, "%s %d ", month_, day);
+		break;
+	case env_t::DATE_FMT_JAPANESE:
+	case env_t::DATE_FMT_JAPANESE_NO_SEASON:
+		sprintf(date, "%s %d%s", month_, day, day_sym);
+		break;
+	case env_t::DATE_FMT_SEASON:
+	case env_t::DATE_FMT_MONTH:
+		sprintf(date, "%s, ", month_);
+		break;
+	}
+	return date;
+}
 
 /* get a name for a non-matching object */
 const char *translator::compatibility_name(const char *str)
