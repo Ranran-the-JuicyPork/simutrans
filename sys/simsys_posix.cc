@@ -50,7 +50,7 @@ resolution dr_query_screen_resolution()
 }
 
 // open the window
-int dr_os_open(int, int, bool)
+int dr_os_open(int, int, sint16)
 {
 	return 1;
 }
@@ -106,14 +106,6 @@ void GetEvents()
 	}
 }
 
-
-void GetEventsNoWait()
-{
-	if(  sigterm_received  ) {
-		sys_event.type = SIM_SYSTEM;
-		sys_event.code = SYSTEM_QUIT;
-	}
-}
 
 void show_pointer(int)
 {
@@ -181,6 +173,35 @@ static void posix_sigterm(int)
 }
 
 
+const char* dr_get_locale()
+{
+	return "";
+}
+
+bool dr_has_fullscreen()
+{
+	return false;
+}
+
+sint16 dr_get_fullscreen()
+{
+	return 0;
+}
+
+sint16 dr_toggle_borderless()
+{
+	return 0;
+}
+
+sint16 dr_suspend_fullscreen()
+{
+	return 0;
+}
+
+void dr_restore_fullscreen(sint16) {}
+
+
+
 int main(int argc, char **argv)
 {
 	signal( SIGTERM, posix_sigterm );
@@ -189,3 +210,6 @@ int main(int argc, char **argv)
 #endif
 	return sysmain(argc, argv);
 }
+
+
+

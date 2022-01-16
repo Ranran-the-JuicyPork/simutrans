@@ -76,14 +76,14 @@ obj_t::~obj_t()
 	grund_t *gr = welt->lookup(pos);
 	if(!gr  ||  !gr->obj_remove(this)) {
 		// not found? => try harder at all map locations
-		dbg->warning("obj_t::~obj_t()","couldn't remove %p from %d,%d,%d",this, pos.x , pos.y, pos.z);
+		dbg->warning("obj_t::~obj_t()", "Could not remove %p from (%s)", (void *)this, pos.get_str());
 
 		// first: try different height ...
 		gr = welt->access(pos.get_2d())->get_boden_von_obj(this);
 		if(gr  &&  gr->obj_remove(this)) {
 			dbg->warning("obj_t::~obj_t()",
-				"removed %p from %d,%d,%d, but it should have been on %d,%d,%d",
-				this,
+				"Removed %p from (%hi,%hi,%hhi), but it should have been on (%hi,%hi,%hhi)",
+				(void *)this,
 				gr->get_pos().x, gr->get_pos().y, gr->get_pos().z,
 				pos.x, pos.y, pos.z);
 			return;
@@ -96,8 +96,8 @@ obj_t::~obj_t()
 				grund_t *gr = welt->access(k)->get_boden_von_obj(this);
 				if (gr && gr->obj_remove(this)) {
 					dbg->warning("obj_t::~obj_t()",
-						"removed %p from %d,%d,%d, but it should have been on %d,%d,%d",
-						this,
+						"Removed %p from (%hi,%hi,%hhi), but it should have been on (%hi,%hi,%hhi)",
+						(void *)this,
 						gr->get_pos().x, gr->get_pos().y, gr->get_pos().z,
 						pos.x, pos.y, pos.z);
 					return;
@@ -134,7 +134,7 @@ void obj_t::info(cbuffer_t & buf) const
 	char              translation[256];
 	char const* const owner =
 		owner_n == 1              ? translator::translate("Eigenbesitz\n")   :
-		owner_n == PLAYER_UNOWNED ? translator::translate("Kein Besitzer\n") :
+		owner_n == PLAYER_UNOWNED ? "" : // was translator::translate("Kein Besitzer\n") :
 		get_owner()->get_name();
 	tstrncpy(translation, owner, lengthof(translation));
 	// remove trailing linebreaks etc.
@@ -316,7 +316,7 @@ void obj_t::mark_image_dirty(image_id image, sint16 yoff) const
 		display_mark_img_dirty( image, scr_pos.x + xpos, scr_pos.y + ypos + yoff);
 
 		// too close to border => set dirty to be sure (smoke, skyscrapers, birds, or the like)
-		scr_coord_val xbild, ybild, wbild, hbild;
+		scr_coord_val xbild = 0, ybild = 0, wbild = 0, hbild = 0;
 		display_get_image_offset( image, &xbild, &ybild, &wbild, &hbild );
 		const sint16 distance_to_border = 3 - (yoff+get_yoff()+ybild)/(rasterweite/4);
 		if(  pos.x <= distance_to_border  ||  pos.y <= distance_to_border  ) {

@@ -21,6 +21,7 @@
 #include "../simconvoi.h"
 #include "../simhalt.h"
 #include "../simmesg.h"
+#include "../utils/cbuffer_t.h"
 
 
 road_vehicle_t::road_vehicle_t(koord3d pos, const vehicle_desc_t* desc, player_t* player, convoi_t* cn) :
@@ -116,7 +117,7 @@ bool road_vehicle_t::check_next_tile(const grund_t *bd) const
 			if(  rs->get_desc()->get_min_speed()>0  &&  rs->get_desc()->get_min_speed()>kmh_to_speed(get_desc()->get_topspeed())  ) {
 				return false;
 			}
-			if(  rs->get_desc()->is_private_way()  &&  (rs->get_player_mask() & (1<<get_player_nr()) ) == 0  ) {
+			if(  rs->get_desc()->is_private_way()  &&  (rs->get_player_mask() & (1<<get_owner_nr()) ) == 0  ) {
 				// private road
 				return false;
 			}

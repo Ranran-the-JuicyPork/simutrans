@@ -15,8 +15,9 @@ gui_image_list_t::gui_image_list_t(vector_tpl<image_data_t*> *images) :
 	placement(16, 16)
 {
 	this->images = images;
-	use_rows = true;
 	player_nr = 0;
+	max_rows = -1;
+	max_width = -1;
 }
 
 
@@ -28,7 +29,7 @@ gui_image_list_t::gui_image_list_t(vector_tpl<image_data_t*> *images) :
 bool gui_image_list_t::infowin_event(const event_t *ev)
 {
 	int sel_index = index_at(scr_coord(0,0)-pos, ev->mx, ev->my);
-	if(  sel_index != -1  &&  (IS_LEFTCLICK(ev)  ||  IS_LEFTDBLCLK(ev))  ) {
+	if(  sel_index != -1  &&  (IS_LEFTDBLCLK(ev)  ||  IS_LEFTRELEASE(ev))  ) {
 		value_t p;
 		p.i = sel_index;
 		call_listeners( p );
@@ -45,15 +46,12 @@ int gui_image_list_t::index_at(scr_coord parent_pos, int xpos, int ypos) const
 	ypos -= parent_pos.y + pos.y + BORDER;
 
 	if(xpos>=0  &&  ypos>=0  &&  xpos<size.w-2*BORDER  &&  ypos < size.h-2*BORDER) {
-		const int rows = (size.h - 2 * BORDER) / grid.y;
 		const int columns = (size.w - 2 * BORDER) / grid.x;
 
 		const int column = xpos / grid.x;
 		const int row = ypos / grid.y;
 
-		const unsigned int index = use_rows ?
-		row * columns + column :
-		column * rows + row;
+		const unsigned int index = row * columns + column;
 
 		if (index < images->get_count()  &&  (*images)[index]->image != IMG_EMPTY) {
 			return index;
@@ -67,7 +65,6 @@ int gui_image_list_t::index_at(scr_coord parent_pos, int xpos, int ypos) const
 
 void gui_image_list_t::draw(scr_coord parent_pos)
 {
-	const int rows = (size.h - 2 * BORDER) / grid.y;
 	const int columns = (size.w - 2 * BORDER) / grid.x;
 
 	// sel_index should come from infowin_event, but it is not sure?
@@ -76,7 +73,6 @@ void gui_image_list_t::draw(scr_coord parent_pos)
 	// Show available wagon types
 	int xmin = parent_pos.x + pos.x + BORDER;
 	int ymin = parent_pos.y + pos.y + BORDER;
-	int ymax = ymin + rows * grid.y;
 	int xmax = xmin + columns * grid.x;
 	int xpos = xmin;
 	int ypos = ymin;
@@ -123,31 +119,29 @@ void gui_image_list_t::draw(scr_coord parent_pos)
 			}
 		}
 		// advance x, y to next position
-		if(use_rows) {
-			xpos += grid.x;
-			if(xpos == xmax) {
-				xpos = xmin;
-				ypos += grid.y;
-			}
-		}
-		else {
+		xpos += grid.x;
+		if(xpos == xmax) {
+			xpos = xmin;
 			ypos += grid.y;
-			if(ypos == ymax) {
-				ypos = ymin;
-				xpos += grid.x;
-			}
 		}
 	}
 }
 
 
+scr_size gui_image_list_t::get_min_size() const { return get_max_size(); }
 
-void gui_image_list_t::recalc_size()
+scr_size gui_image_list_t::get_max_size() const
 {
-	const int columns = (size.w - 2 * BORDER) / grid.x;
-	int rows = (images->get_count() + columns-1) / columns;
-	if(rows== 0) {
-		rows = 1;
+	if (max_rows > 0) {
+		// this many images per column
+		sint32 cols = (images->get_count() + max_rows - 1) / max_rows;
+		return scr_size(cols*grid.x + 2*BORDER, max_rows*grid.y + 2*BORDER);
 	}
-	set_size(scr_size(size.w, rows * grid.y + 2*BORDER));
+	else if (max_width > 0) {
+		sint32 cols = (max_width - 2*BORDER) / grid.x;
+		sint32 rows = (images->get_count() + cols - 1) / cols;
+		return scr_size(cols*grid.x + 2*BORDER, rows*grid.y + 2*BORDER);
+
+	}
+	return scr_size((images->get_count()+1)*grid.x + 2*BORDER, grid.y + 2*BORDER);
 }

@@ -37,6 +37,10 @@ public:
 
 	static sint16 menupos;
 
+	static sint16 fullscreen;
+
+	static bool reselect_closes_tool;
+
 	/// points to the current user directory for loading and saving
 	static const char *user_dir;
 
@@ -92,6 +96,7 @@ public:
 	/// if true save game under autosave-#paksetname#.sve and reload it upon startup
 	static bool reload_and_save_on_quit;
 
+	static uint8 network_heavy_mode;
 	/// @} end of Network-related settings
 
 
@@ -169,6 +174,9 @@ public:
 
 	/// open only one info window per click on a map-square
 	static bool single_info;
+
+	///  linelist enforcing single line GUI
+	static bool single_line_gui;
 
 	/// for schedules with rails hide the back ticket button
 	static bool hide_rail_return_ticket;
@@ -320,6 +328,9 @@ public:
 	 * @see grund_t::display_overlay
 	 */
 	static sint32 show_names;
+
+	/// Show factory storage bar
+	static uint8 show_factory_storage_bar;
 
 	/// if a schedule is open, show tiles which are used by it
 	static bool visualize_schedule;

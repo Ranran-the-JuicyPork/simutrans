@@ -321,9 +321,12 @@ private:
 	uint8 activity_count;
 
 	// The adjacent connected transformer, if any.
-	leitung_t *transformer;
+	vector_tpl<leitung_t *>transformers;
 
 	// true, if the factory did produce enough in the last step to require power
+	bool currently_requiring_power;
+
+	// there is input or output and we do something with it ...
 	bool currently_producing;
 
 	uint32 last_sound_ms;
@@ -562,19 +565,20 @@ public:
 	sint32 vorrat_an(const goods_desc_t *ware);        // Vorrat von Warentyp
 
 	// true, if there was production requiring power in the last step
-	bool is_currently_producing() const { return currently_producing; }
+	bool is_currently_producing() const { return currently_requiring_power; }
 
 	/**
 	 * True if a transformer is connected to this factory.
 	 */
-	bool is_transformer_connected() const { return transformer != NULL; }
+	bool is_transformer_connected() const { return !transformers.empty(); }
 
-	leitung_t* get_transformer() { return transformer; }
+	vector_tpl<leitung_t*> const &get_transformers() { return transformers; }
 
 	/**
 	 * Connect transformer to this factory.
 	 */
-	void set_transformer_connected(leitung_t *transformer) { this->transformer = transformer; }
+	void add_transformer_connected(leitung_t *transformer) { transformers.append_unique(transformer); }
+	void remove_transformer_connected( leitung_t* transformer ) { transformers.remove( transformer ); }
 
 	/**
 	 * @return 1 wenn consumption,
@@ -679,6 +683,11 @@ public:
 	uint32 get_total_in() const { return total_input; }
 	uint32 get_total_transit() const { return total_transit; }
 	uint32 get_total_out() const { return total_output; }
+
+	/**
+	 * Draws some nice colored bars giving some status information
+	 */
+	void display_status(sint16 xpos, sint16 ypos);
 
 	/**
 	 * Crossconnects all factories

@@ -316,7 +316,7 @@ void display_ddd_box_clip_rgb(scr_coord_val, scr_coord_val, scr_coord_val, scr_c
 {
 }
 
-void display_ddd_proportional_clip(scr_coord_val, scr_coord_val, scr_coord_val, scr_coord_val, FLAGGED_PIXVAL, FLAGGED_PIXVAL, const char *, int  CLIP_NUM_DEF_NOUSE)
+void display_ddd_proportional_clip(scr_coord_val, scr_coord_val, FLAGGED_PIXVAL, FLAGGED_PIXVAL, const char *, int  CLIP_NUM_DEF_NOUSE)
 {
 }
 
@@ -341,7 +341,7 @@ void display_show_load_pointer(int)
 {
 }
 
-bool simgraph_init(scr_size, bool)
+bool simgraph_init(scr_size, sint16)
 {
 	return true;
 }
@@ -392,6 +392,10 @@ void display_right_triangle_rgb(scr_coord_val, scr_coord_val, scr_coord_val, con
 {
 }
 
+void display_signal_direction_rgb( scr_coord_val, scr_coord_val, uint8, uint8, PIXVAL, PIXVAL, bool, uint8 )
+{
+}
+
 void display_set_progress_text(const char *)
 {
 }
@@ -404,9 +408,8 @@ void display_img_aligned( const image_id, scr_rect, int, bool )
 {
 }
 
-scr_coord_val display_proportional_ellipsis_rgb( scr_rect, const char *, int, PIXVAL, bool, bool, PIXVAL)
+void display_proportional_ellipsis_rgb( scr_rect, const char *, int, PIXVAL, bool, bool, PIXVAL)
 {
-	return 0;
 }
 
 image_id get_image_count()

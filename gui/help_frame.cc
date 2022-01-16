@@ -326,11 +326,11 @@ void help_frame_t::set_helpfile(const char *filename, bool resize_frame )
 		FOR(vector_tpl<tool_t*>, const i, tool_t::char_to_tool) {
 			cbuffer_t c;
 			char str[16];
-			if(  i->command_flags&2  ) {
+			if(  i->command_flags & SIM_MOD_CTRL  ) {
 				c.append( translator::translate( "[CTRL]" ) );
 				c.append( " + " );
 			}
-			if(  i->command_flags&1  ) {
+			if(  i->command_flags & SIM_MOD_SHIFT  ) {
 				c.append( translator::translate( "[SHIFT]" ) );
 				c.append( " + " );
 			}
@@ -489,14 +489,18 @@ void help_frame_t::add_helpfile( cbuffer_t &section, const char *titlename, cons
 	if(  titlename == NULL  &&  file  ) {
 		// get the title from the helpfile
 		char htmlline[1024];
-		fread( htmlline, lengthof(htmlline)-1, 1, file );
-		filetitle = extract_title( htmlline );
-		if(  filetitle.empty()  ) {
-			// no idea how to generate the right name ...
-			titlename = filename;
+		if (fread( htmlline, lengthof(htmlline)-1, 1, file ) == 1) {
+			filetitle = extract_title( htmlline );
+			if(  filetitle.empty()  ) {
+				// no idea how to generate the right name ...
+				titlename = filename;
+			}
+			else {
+				titlename = filetitle.c_str();
+			}
 		}
 		else {
-			titlename = filetitle.c_str();
+			titlename = filename;
 		}
 	}
 	else {

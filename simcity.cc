@@ -280,7 +280,6 @@ bool stadt_t::cityrules_init(const std::string &objfilename)
 	if (!cityconf.open((user_dir+"cityrules.tab").c_str())) {
 		if (!cityconf.open((objfilename+"config/cityrules.tab").c_str())) {
 			dbg->fatal("stadt_t::init()", "Can't read cityrules.tab" );
-			return false;
 		}
 	}
 
@@ -576,44 +575,29 @@ static bool compare_gebaeude_pos(const gebaeude_t* a, const gebaeude_t* b)
 // this function adds houses to the city house list
 void stadt_t::add_gebaeude_to_stadt(const gebaeude_t* gb, bool ordered)
 {
+	static vector_tpl<grund_t*> gb_tiles;
 	if (gb != NULL) {
-		const building_tile_desc_t* tile  = gb->get_tile();
-		koord size = tile->get_desc()->get_size(tile->get_layout());
-		const koord pos = gb->get_pos().get_2d() - tile->get_offset();
-		koord k;
-
-		// add all tiles
-		for (k.y = 0; k.y < size.y; k.y++) {
-			for (k.x = 0; k.x < size.x; k.x++) {
-				if (gebaeude_t* const add_gb = obj_cast<gebaeude_t>(welt->lookup_kartenboden(pos + k)->first_obj())) {
-					if (gb->is_same_building(add_gb)) {
-
-						if(  ordered  ) {
-							buildings.insert_ordered(add_gb, tile->get_desc()->get_level() + 1, compare_gebaeude_pos);
-						}
-						else {
-							buildings.append(add_gb, tile->get_desc()->get_level() + 1);
-						}
-
-						add_gb->set_stadt(this);
-						if (add_gb->get_tile()->get_desc()->is_townhall()) {
-							has_townhall = true;
-						}
-					}
-					else {
-						// found tile of another building, ignore it
-					}
-				}
+		uint16 level = gb->get_tile()->get_desc()->get_level()+1;
+		gb->get_tile_list( gb_tiles );
+		FOR( vector_tpl<grund_t*>, gr, gb_tiles ) {
+			gebaeude_t* add_gb = gr->find<gebaeude_t>();
+			if( ordered ) {
+				buildings.insert_ordered( add_gb, level, compare_gebaeude_pos );
+			}
+			else {
+				buildings.append( add_gb, level );
+			}
+			add_gb->set_stadt( this );
+			if( add_gb->get_tile()->get_desc()->is_townhall() ) {
+				has_townhall = true;
 			}
 		}
 		// no update of city limits
 		// as has_low_density may depend on the order the buildings list is filled
 		if (!ordered) {
 			// check borders
-			pruefe_grenzen(pos);
-			if(size!=koord(1,1)) {
-				pruefe_grenzen(pos+size-koord(1,1));
-			}
+			koord size = gb_tiles.back()->get_pos().get_2d()-gb_tiles.front()->get_pos().get_2d()+koord( 1, 1 );
+			pruefe_grenzen(pos, size);
 		}
 	}
 }
@@ -636,40 +620,15 @@ void stadt_t::update_gebaeude_from_stadt(gebaeude_t* gb)
 }
 
 
-void stadt_t::pruefe_grenzen(koord k)
+void stadt_t::pruefe_grenzen(koord /*k*/, koord /*size*/)
 {
-	// WARNING: do not call this during multithreaded loading,
-	// as has_low_density may depend on the order the buildings list is filled
-	if(  has_low_density  ) {
-		// has extra wide borders => change density calculation
-		has_low_density = (buildings.get_count()<10  ||  (buildings.get_count()*100l)/(abs(ur.x-lo.x-4)*abs(ur.y-lo.y-4)+1) > min_building_density);
-		if(!has_low_density)  {
-			// full recalc needed due to map borders ...
-			recalc_city_size();
-			return;
-		}
-	}
-	else {
-		has_low_density = (buildings.get_count()<10  ||  (buildings.get_count()*100l)/((ur.x-lo.x)*(ur.y-lo.y)+1) > min_building_density);
-		if(has_low_density)  {
-			// wide borders again ..
-			lo -= koord(2,2);
-			ur += koord(2,2);
-		}
-	}
-	// now just add single coordinates
-	if(  has_low_density  ) {
-		lo.clip_max(k-koord(2,2));
-		ur.clip_min(k+koord(2,2));
-	}
-	else {
-		// first grow within ...
-		lo.clip_max(k);
-		ur.clip_min(k);
-	}
-
-	lo.clip_min(koord(0,0));
-	ur.clip_max(koord(welt->get_size().x-1,welt->get_size().y-1));
+	/* somehow we sometimes end up during growth with a high density
+	 * city that is not recognized as such (happens more frequently with pak64.japan)
+	 * Therefore, we just recalc the borders each time; building events
+	 * are few, and the penalty is not strong.
+	 * See version control for old code.
+	 */
+	recalc_city_size();
 }
 
 
@@ -708,8 +667,9 @@ void stadt_t::recalc_city_size()
 	FOR(weighted_vector_tpl<gebaeude_t*>, const i, buildings) {
 		if (i->get_tile()->get_desc()->get_type() != building_desc_t::headquarters) {
 			koord const& gb_pos = i->get_pos().get_2d();
+			koord const& gb_size = i->get_tile()->get_desc()->get_size(i->get_tile()->get_layout());
 			lo.clip_max(gb_pos);
-			ur.clip_min(gb_pos);
+			ur.clip_min(gb_pos + gb_size);
 		}
 	}
 
@@ -2375,7 +2335,7 @@ void stadt_t::check_bau_spezial(bool new_town)
 				if (desc->get_all_layouts() > 1) {
 					rotate = (simrand(20) & 2) + is_rotate;
 				}
-				hausbauer_t::build( owner, welt->lookup_kartenboden(best_pos)->get_pos(), rotate, desc );
+				hausbauer_t::build( owner, best_pos, rotate, desc );
 				// tell the player, if not during initialization
 				if (!new_town) {
 					cbuffer_t buf;
@@ -2441,7 +2401,7 @@ void stadt_t::check_bau_spezial(bool new_town)
 						}
 					}
 					// and then build it
-					const gebaeude_t* gb = hausbauer_t::build(owner, welt->lookup_kartenboden(best_pos + koord(1, 1))->get_pos(), 0, desc);
+					const gebaeude_t* gb = hausbauer_t::build(owner, best_pos + koord(1, 1), 0, desc);
 					hausbauer_t::monument_erected(desc);
 					add_gebaeude_to_stadt(gb);
 					// tell the player, if not during initialization
@@ -2634,7 +2594,7 @@ void stadt_t::check_bau_townhall(bool new_town)
 			dbg->error( "stadt_t::check_bau_townhall", "no better position found!" );
 			return;
 		}
-		gebaeude_t const* const new_gb = hausbauer_t::build(owner, welt->lookup_kartenboden(best_pos + offset)->get_pos(), layout, desc);
+		gebaeude_t const* const new_gb = hausbauer_t::build(owner, best_pos + offset, layout, desc);
 		DBG_MESSAGE("new townhall", "use layout=%i", layout);
 		add_gebaeude_to_stadt(new_gb);
 		// sets has_townhall to true
@@ -3172,7 +3132,7 @@ void stadt_t::build_city_building(const koord k)
 	// so we found at least one suitable building for this place
 	int rotation = orient_city_building( k, h, maxsize );
 	if(  rotation >= 0  ) {
-		const gebaeude_t* gb = hausbauer_t::build(NULL, welt->lookup_kartenboden(k)->get_pos(), rotation, h);
+		const gebaeude_t* gb = hausbauer_t::build(NULL, k, rotation, h);
 		add_gebaeude_to_stadt(gb);
 	}
 	// to be extended for larger building ...
@@ -3193,7 +3153,7 @@ void stadt_t::renovate_city_building(gebaeude_t *gb)
 	const int level = gb_desc->get_level();
 
 	if(  welt->get_timeline_year_month() > gb_desc->no_renovation_month()  ) {
-		// this is a historic city building (as defiend by the pak set author), so do not renovate
+		// this is a historic city building (as defined by the pak set author), so do not renovate
 		return;
 	}
 

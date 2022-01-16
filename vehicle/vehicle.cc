@@ -303,7 +303,7 @@ void vehicle_t::play_sound() const
  * Sets route_index, pos_next, steps_next.
  * If @p recalc is true this sets position and recalculates/resets movement parameters.
  */
-void vehicle_t::initialise_journey(uint16 start_route_index, bool recalc)
+void vehicle_t::initialise_journey(route_t::index_t start_route_index, bool recalc)
 {
 	route_index = start_route_index+1;
 	check_for_finish = false;
@@ -1136,15 +1136,26 @@ void vehicle_t::display_after(int xpos, int ypos, bool is_global) const
 		tooltip_text[0] = 0;
 		uint8 state = env_t::show_vehicle_states;
 		if(  state==1  ||  state==2  ) {
+			// mouse over check
+			bool mo_this_convoy = false;
+			const koord3d mouse_pos = world()->get_zeiger()->get_pos();
+			if(  mouse_pos == get_pos()  ) {
+				mo_this_convoy = true;
+			}
+			else if(  grund_t* mo_gr = world()->lookup(mouse_pos)  ) {
+				if(  vehicle_t* mo_veh = (vehicle_t *)mo_gr->get_convoi_vehicle()  ) {
+					mo_this_convoy = mo_veh->get_convoi() == get_convoi();
+				}
+			}
 			// only show when mouse over vehicle
-			if(  welt->get_zeiger()->get_pos()==get_pos()  ) {
+			if(  mo_this_convoy  ) {
 				state = 3;
 			}
 			else {
 				state = 0;
 			}
 		}
-		if( state != 3 ) {
+		if(  state != 3  ) {
 			// nothing to show
 			return;
 		}
@@ -1163,12 +1174,18 @@ void vehicle_t::display_after(int xpos, int ypos, bool is_global) const
 
 			case convoi_t::LOADING:
 				if(  state>=3  ) {
-					if(  cnv->get_schedule()->get_current_entry().minimum_loading == 0  &&  cnv->get_schedule()->get_current_entry().waiting_time >0  ) {
+					if(  cnv->is_unloading()  ) {
+						sprintf( tooltip_text, translator::translate( "Unloading (%i%%)!" ), cnv->get_loading_level() );
+					}
+					else if(  cnv->get_schedule()->get_current_entry().minimum_loading == 0  &&  cnv->get_schedule()->get_current_entry().waiting_time >0  ) {
 						// is on a schedule
 						sprintf(tooltip_text, translator::translate("Loading (%i%%) departure %s!"), cnv->get_loading_level(), tick_to_string(cnv->get_departure_ticks(),true));
 					}
+					else if( cnv->get_loading_limit()==0 ){
+						sprintf( tooltip_text, translator::translate( "Loading (%i%%)!" ), cnv->get_loading_level(), cnv->get_loading_limit() );
+					}
 					else {
-						sprintf(tooltip_text, translator::translate("Loading (%i->%i%%)!"), cnv->get_loading_level(), cnv->get_loading_limit());
+						sprintf( tooltip_text, translator::translate( "Loading (%i->%i%%)!" ), cnv->get_loading_level(), cnv->get_loading_limit() );
 					}
 					color = color_idx_to_rgb(COL_YELLOW);
 				}
@@ -1228,13 +1245,12 @@ void vehicle_t::display_after(int xpos, int ypos, bool is_global) const
 
 		// something to show?
 		if(  tooltip_text[0]  ) {
-			const int width = proportional_string_width(tooltip_text)+7;
 			const int raster_width = get_current_tile_raster_width();
 			get_screen_offset( xpos, ypos, raster_width );
 			xpos += tile_raster_scale_x(get_xoff(), raster_width);
 			ypos += tile_raster_scale_y(get_yoff(), raster_width)+14;
 			if(ypos>LINESPACE+32  &&  ypos+LINESPACE<display_get_clip_wh().yy) {
-				display_ddd_proportional_clip( xpos, ypos, width, 0, color, color_idx_to_rgb(COL_BLACK), tooltip_text, true );
+				display_ddd_proportional_clip( xpos, ypos, color, color_idx_to_rgb(COL_BLACK), tooltip_text, true );
 			}
 		}
 	}

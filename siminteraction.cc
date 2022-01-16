@@ -41,9 +41,9 @@ void interaction_t::move_view( const event_t &ev )
 
 	// move the mouse pointer back to starting location => infinite mouse movement
 	if(  (ev.mx - ev.cx) != 0  ||  (ev.my-ev.cy) !=0  ) {
-#ifdef __BEOS__
 		change_drag_start(ev.mx - ev.cx, ev.my - ev.cy);
-#else
+#if 0
+		// move pointer catches the mouse inside the windows but is incompatible with any touch based scolling
 		move_pointer(ev.cx, ev.cy);
 #endif
 	}
@@ -201,7 +201,7 @@ void interaction_t::interactive_event( const event_t &ev )
 					bool ok=false;
 					FOR(vector_tpl<tool_t*>, const i, tool_t::char_to_tool) {
 						if(  i->command_key == ev.ev_code  ) {
-							if(  i->command_flags == 0  ||  (ev.ev_key_mod & 3) == i->command_flags  ) {
+							if(  i->command_flags == 0  ||  (ev.ev_key_mod & (SIM_MOD_SHIFT|SIM_MOD_CTRL)) == i->command_flags  ) {
 								world->set_tool(i, world->get_active_player());
 								ok = true;
 								break;
@@ -299,61 +299,7 @@ bool interaction_t::process_event( event_t &ev )
 {
 	if(ev.ev_class==EVENT_SYSTEM  &&  ev.ev_code==SYSTEM_QUIT) {
 		// quit the program if this window is closed
-		env_t::quit_simutrans = true;
-
-		// we may be requested to save the game before exit
-		if(  env_t::server  &&  env_t::server_save_game_on_quit  ) {
-
-			// to ensure only one attempt is made
-			env_t::server_save_game_on_quit = false;
-
-			// following code quite similar to nwc_sync_t::do_coomand
-			dr_chdir( env_t::user_dir );
-
-			// first save password hashes
-			char fn[256];
-			sprintf( fn, "server%d-pwdhash.sve", env_t::server );
-			loadsave_t file;
-			if(  file.wr_open(fn, loadsave_t::zipped, 1, "hashes", SAVEGAME_VER_NR ) == loadsave_t::FILE_STATUS_OK  ) {
-				world->rdwr_player_password_hashes( &file );
-				file.close();
-			}
-
-			// remove passwords before transfer on the server and set default client mask
-			// they will be restored in karte_t::laden
-			uint16 unlocked_players = 0;
-			for(  int i=0;  i<PLAYER_UNOWNED; i++  ) {
-				player_t *player = world->get_player(i);
-				if(  player==NULL  ||  player->access_password_hash().empty()  ) {
-					unlocked_players |= (1<<i);
-				}
-				else {
-					player->access_password_hash().clear();
-				}
-			}
-
-			// save game
-			sprintf( fn, "server%d-restore.sve", env_t::server );
-			bool old_restore_UI = env_t::restore_UI;
-			env_t::restore_UI = true;
-			world->save( fn, false, SAVEGAME_VER_NR, false );
-			env_t::restore_UI = old_restore_UI;
-		}
-		else if(  env_t::reload_and_save_on_quit  &&  !env_t::networkmode  ) {
-			// save current game, if not online
-			bool old_restore_UI = env_t::restore_UI;
-			env_t::restore_UI = true;
-
-			// construct from pak name an autosave if requested
-			std::string pak_name( "autosave-" );
-			pak_name.append( env_t::objfilename );
-			pak_name.erase( pak_name.length()-1 );
-			pak_name.append( ".sve" );
-
-			world->save( pak_name.c_str(), true, SAVEGAME_VER_NR, false );
-			env_t::restore_UI = old_restore_UI;
-		}
-		destroy_all_win(true);
+		world->stop(true);
 		return true;
 	}
 
@@ -383,6 +329,7 @@ bool interaction_t::process_event( event_t &ev )
 	else if(IS_RIGHTDRAG(&ev)) {
 		// unset following
 		world->get_viewport()->set_follow_convoi( convoihandle_t() );
+		catch_dragging();
 		move_view(ev);
 	}
 	else if(  (left_drag  ||  world->get_tool(world->get_active_player_nr())->get_id() == (TOOL_QUERY | GENERAL_TOOL))  &&  IS_LEFTDRAG(&ev)  ) {
@@ -393,13 +340,14 @@ bool interaction_t::process_event( event_t &ev )
 			left_drag = true;
 		}
 		world->get_viewport()->set_follow_convoi( convoihandle_t() );
+		catch_dragging();
 		move_view(ev);
-		ev.ev_code = EVENT_NONE;
+		ev.ev_code = IGNORE_EVENT;
 	}
 
 	if(  IS_LEFTRELEASE(&ev)  &&  left_drag  ) {
 		// show the mouse and swallow this event if we were dragging before
-		ev.ev_code = EVENT_NONE;
+		ev.ev_code = IGNORE_EVENT;
 		display_show_pointer(true);
 		left_drag = false;
 	}

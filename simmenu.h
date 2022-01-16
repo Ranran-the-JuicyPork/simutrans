@@ -123,6 +123,7 @@ enum {
 	TOOL_MOVE_MAP,
 	TOOL_ROLLUP_ALL_WIN,
 	TOOL_RECOLOUR_TOOL,
+	TOOL_SHOW_FACTORY_STORAGE,
 	SIMPLE_TOOL_COUNT,
 	SIMPLE_TOOL = 0x2000
 };
@@ -176,6 +177,7 @@ enum {
 	TOOLBAR_TOOL = 0x8000u
 };
 
+
 class tool_t {
 protected:
 	image_id icon;
@@ -189,6 +191,10 @@ protected:
 	const char *default_param;
 public:
 	uint16 get_id() const { return id; }
+
+	const char *get_name() const { return id_to_string(id); }
+
+	static const char *id_to_string(uint16 id);
 
 	static tool_t *dummy;
 
@@ -247,7 +253,9 @@ public:
 	static void init_menu();
 	static void exit_menu();
 
-	static void read_menu(const std::string &objfilename);
+	/// Read tool, toolbar configuration and tool shortcuts from @p menuconf
+	/// @param menuconf Path to file to read
+	static bool read_menu(const std::string &menuconf);
 
 	static uint16 const dummy_id = 0xFFFFU;
 

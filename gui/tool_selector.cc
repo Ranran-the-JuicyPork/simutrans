@@ -198,11 +198,20 @@ bool tool_selector_t::infowin_event(const event_t *ev)
 			// change tool
 			tool_t *tool = tools[wz_idx].tool;
 			if(IS_LEFTRELEASE(ev)) {
-				welt->set_tool( tool, welt->get_active_player() );
+				if(  env_t::reselect_closes_tool  &&  tool  &&  tool->is_selected() ) {
+					// ->exit triggers tool_selector_t::infowin_event in the closing toolbar,
+					// which resets active tool to query tool
+					if( tool->exit( welt->get_active_player() ) ) {
+						welt->set_tool( tool_t::general_tool[TOOL_QUERY], welt->get_active_player() );
+					}
+				}
+				else {
+					welt->set_tool( tool, welt->get_active_player() );
+				}
 			}
 			else {
 				// right-click on toolbar icon closes toolbars and dialogues. Resets selectable simple and general tools to the query-tool
-				if (tool  &&  tool->is_selected()  ) {
+				if(  tool  &&  tool->is_selected()  ) {
 					// ->exit triggers tool_selector_t::infowin_event in the closing toolbar,
 					// which resets active tool to query tool
 					if(  tool->exit(welt->get_active_player())  ) {
@@ -255,22 +264,29 @@ bool tool_selector_t::infowin_event(const event_t *ev)
 
 void tool_selector_t::draw(scr_coord pos, scr_size sz)
 {
-	CLIP_NUM_PDECL CLIP_NUM_VAR CLIP_NUM_DEFAULT_ZERO;
 	player_t *player = welt->get_active_player();
 
 	if( toolbar_id == 0 ) {
-		set_windowsize(sz);
-		// sanity checks for main menu
+		// checks for main menu (since it can change during changing layout)
 		if(env_t::menupos==MENU_TOP || env_t::menupos == MENU_BOTTOM) {
 			offset.y = 0;
 			allow_break = false;
 			tool_icon_width = (display_get_width() + env_t::iconsize.w - 1) / env_t::iconsize.w;
 			tool_icon_height = 1; // only single row for title bar
-			has_prev_next = tool_icon_width < tools.get_count();
-			if (tool_icon_disp_start > tool_icon_disp_end) {
+			set_windowsize(sz);
+			// check for too large values (acter changing width etc.)
+			if (  display_get_width() >= (int)tools.get_count() * env_t::iconsize.w  ) {
 				tool_icon_disp_start = 0;
+				offset.x = 0;
 			}
-			tool_icon_disp_end = min(tool_icon_disp_start + tool_icon_width + (offset.x != 0), tools.get_count());
+			else {
+				scr_coord_val wx = (tools.get_count() - tool_icon_disp_start + 1) * env_t::iconsize.w + offset.x;
+				if (wx < display_get_width()) {
+					tool_icon_disp_start = tool_icon_disp_end < tool_icon_height ? 0 : tool_icon_disp_end - tool_icon_width;
+					offset.x = display_get_width() - (tools.get_count() - tool_icon_disp_start) * env_t::iconsize.w;
+				}
+			}
+			has_prev_next = (int)tools.get_count() * env_t::iconsize.w > sz.w;
 		}
 		else {
 			offset.x = 0;
@@ -279,18 +295,34 @@ void tool_selector_t::draw(scr_coord pos, scr_size sz)
 			// only single column for title bar
 			tool_icon_height = (display_get_height() - win_get_statusbar_height() + env_t::iconsize.h - 1) / env_t::iconsize.h;
 			set_windowsize(scr_size(env_t::iconsize.w, display_get_height() - win_get_statusbar_height()));
-			has_prev_next = tool_icon_height < tools.get_count();
-			if (tool_icon_disp_start > tool_icon_disp_end) {
+
+			if ( display_get_height() >= (int)tools.get_count() * env_t::iconsize.h  ) {
 				tool_icon_disp_start = 0;
+				offset.y = 0;
 			}
-			tool_icon_disp_end = min(tool_icon_disp_start + tool_icon_height + (offset.y != 0), tools.get_count());
+			else {
+				scr_coord_val hx = (tools.get_count() - tool_icon_disp_start + 1) * env_t::iconsize.h + offset.y;
+				if (hx < display_get_height()) {
+					tool_icon_disp_end = tools.get_count();
+					tool_icon_disp_start = tool_icon_disp_end < tool_icon_height ? 0 : tool_icon_disp_end - tool_icon_height;
+					offset.y = display_get_height() - (tools.get_count() - tool_icon_disp_start) * env_t::iconsize.h;
+				}
+			}
+
+			has_prev_next = (int)tools.get_count() * env_t::iconsize.h > sz.h;
 		}
 	}
 
-	display_push_clip_wh(pos.x, pos.y + D_TITLEBAR_HEIGHT, sz.w, sz.h CLIP_NUM_PAR);
 	for(  uint i = tool_icon_disp_start;  i < tool_icon_disp_end;  i++  ) {
 		const image_id icon_img = tools[i].tool->get_icon(player);
-		const scr_coord draw_pos = pos + offset + scr_coord(( (i-tool_icon_disp_start)%(tool_icon_width+(offset.x!=0)) )*env_t::iconsize.w, D_TITLEBAR_HEIGHT+( (i-tool_icon_disp_start)/(tool_icon_width+(offset.x!=0)) )*env_t::iconsize.h);
+#if COLOUR_DEPTH != 0
+		const scr_coord_val additional_xoffset = ( (i-tool_icon_disp_start)%(tool_icon_width+(offset.x!=0)) )*env_t::iconsize.w;
+		const scr_coord_val additional_yoffset = D_TITLEBAR_HEIGHT+( (i-tool_icon_disp_start)/(tool_icon_width+(offset.x!=0)) )*env_t::iconsize.h;
+#else
+		const scr_coord_val additional_xoffset = 0;
+		const scr_coord_val additional_yoffset = 0;
+#endif
+		const scr_coord draw_pos = pos + offset + scr_coord(additional_xoffset, additional_yoffset);
 		const char *param = tools[i].tool->get_default_param();
 
 		// we don't draw in main menu as it is already made in simwin.cc
@@ -308,7 +340,7 @@ void tool_selector_t::draw(scr_coord pos, scr_size sz)
 
 		// if there's no image we simply skip, button will be transparent showing toolbar background
 		if(  icon_img != IMG_EMPTY  ) {
-			bool tool_dirty = dirty  ||  tools[i].tool->is_selected() ^ tools[i].selected;
+			bool tool_dirty = dirty  ||  (tools[i].tool->is_selected() ^ tools[i].selected);
 			display_fit_img_to_width( icon_img, env_t::iconsize.w );
 			display_color_img(icon_img, draw_pos.x, draw_pos.y, player->get_player_nr(), false, tool_dirty);
 			tools[i].tool->draw_after( draw_pos, tool_dirty);
@@ -325,10 +357,10 @@ void tool_selector_t::draw(scr_coord pos, scr_size sz)
 		mark_rect_dirty_wc(pos.x, pos.y, pos.x + tool_icon_width*env_t::iconsize.w, pos.y + tool_icon_height*env_t::iconsize.h);
 	}
 
-	if(  offset.x != 0  ||  tool_icon_disp_start > 0  ) {
+	if(  offset.x != 0  &&  tool_icon_disp_start > 0  ) {
 		display_color_img(gui_theme_t::arrow_button_left_img[0], pos.x, pos.y + D_TITLEBAR_HEIGHT, 0, false, false);
 	}
-	if(  offset.y != 0  ||  tool_icon_disp_start > 0  ) {
+	if(  offset.y != 0  &&  tool_icon_disp_start > 0  ) {
 		display_color_img(gui_theme_t::arrow_button_up_img[0], pos.x, pos.y + D_TITLEBAR_HEIGHT, 0, false, false);
 	}
 	if(  tool_icon_height == 1  &&  (tool_icon_disp_start+tool_icon_width < tools.get_count()  ||  (-offset.x) < env_t::iconsize.w*tool_icon_width-get_windowsize().w)  ) {
@@ -337,7 +369,6 @@ void tool_selector_t::draw(scr_coord pos, scr_size sz)
 	if(  tool_icon_width == 1  &&  (tool_icon_disp_start+tool_icon_height < tools.get_count()  ||  (-offset.y) < env_t::iconsize.h*tool_icon_height-get_windowsize().h)  ) {
 		display_color_img(gui_theme_t::arrow_button_down_img[0], pos.x+sz.w-D_ARROW_DOWN_WIDTH, pos.y+D_TITLEBAR_HEIGHT+sz.h-D_ARROW_DOWN_HEIGHT, 0, false, false);
 	}
-	display_pop_clip_wh(CLIP_NUM_VAR);
 
 	if(  !is_dragging  ) {
 		// tooltips?

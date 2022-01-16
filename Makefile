@@ -5,8 +5,8 @@
 
 # Define variables here to force them as simple flavor. -> Faster parallel builds.
 FLAGS :=
-CFLAGS :=
-LDFLAGS :=
+CFLAGS ?=
+LDFLAGS ?=
 LIBS :=
 SOURCES :=
 STATIC := 0
@@ -19,14 +19,13 @@ CFG ?= default
 HOSTCC  ?=$(CC)
 HOSTCXX ?=$(CXX)
 
-ALLEGRO_CONFIG   ?= allegro-config
 SDL_CONFIG       ?= sdl-config
 SDL2_CONFIG      ?= pkg-config sdl2
 #SDL2_CONFIG     ?= sdl2-config
 FREETYPE_CONFIG  ?= pkg-config freetype2
 #FREETYPE_CONFIG ?= freetype-config
 
-BACKENDS  := allegro gdi sdl sdl2 mixer_sdl mixer_sdl2 posix
+BACKENDS  := gdi sdl sdl2 mixer_sdl mixer_sdl2 posix
 OSTYPES   := amiga beos freebsd haiku linux mac mingw openbsd
 
 
@@ -62,6 +61,9 @@ else ifeq ($(OSTYPE),mingw)
     CFLAGS  += -static
     LDFLAGS += -static-libgcc -static-libstdc++ -static
   endif
+  ifeq ($(MINGW_PACKAGE_PREFIX),mingw-w64-i686)
+    LDFLAGS   += -Wl,--large-address-aware
+  endif
   LDFLAGS   += -pthread
   CFLAGS    += -Wno-deprecated-copy -DNOMINMAX -DWIN32_LEAN_AND_MEAN -DWINVER=0x0501 -D_WIN32_IE=0x0500
   LIBS      += -lmingw32 -lgdi32 -lwinmm -lws2_32 -limm32
@@ -78,6 +80,9 @@ else ifeq ($(OSTYPE),mingw)
   endif
 else ifeq ($(OSTYPE),linux)
   LD_FLAGS += "-Wl,-Bstatic"
+else ifeq ($(OSTYPE),mac)
+  SOURCES += OSX/translocation.m
+  LDFLAGS += -framework Cocoa
 endif
 
 ifeq ($(BACKEND),sdl2)
@@ -234,23 +239,26 @@ ifdef WITH_REVISION
     ifeq ($(shell expr $(WITH_REVISION) \>= 2), 1)
       REV := $(WITH_REVISION)
     else
-      $(info Query SVN revision ...)
-      REV := $(shell svnversion)
+      REV := $(shell ./get_revision.sh)
       $(info Revision is $(REV))
     endif
-    # we can query the svn directly, should the folder is not an svn (like on github)
-    ifeq ($(REV),)
-      ifeq ($(shell expr $(WITH_REVISION) \<= 1), 1)
-        $(info Query SVN revision with SVN directly...)
-        REV := $(shell svn info --show-item revision svn://servers.simutrans.org/simutrans | sed "s/[0-9]*://" | sed "s/M.*//")
-         $(info Revision is $(REV))
-      endif
-    endif
-
-    ifneq ($(REV),)
-      CFLAGS  += -DREVISION=$(REV)
-    endif
   endif
+endif
+
+ifneq ($(REV),)
+  CFLAGS  += -DREVISION=$(REV)
+  DUMMY := $(shell rm -f revision.h)
+else
+  ifeq ("$(wildcard revision.h)","")
+    DUMMY := $(shell echo '\#define REVISION' > revision.h)
+  endif
+endif
+
+GIT_HASH := $(shell git rev-parse --short=7 HEAD 2>/dev/null 1>/dev/null; echo $$?)
+ifneq ($(GIT_HASH),)
+  GIT_HASH := $(shell git rev-parse --short=7 HEAD)
+  $(info Git hash is 0x$(GIT_HASH))
+  CFLAGS  += -DGIT_HASH=0x$(GIT_HASH)
 endif
 
 
@@ -461,6 +469,8 @@ SOURCES += io/raw_image.cc
 SOURCES += io/raw_image_bmp.cc
 SOURCES += io/raw_image_png.cc
 SOURCES += io/raw_image_ppm.cc
+SOURCES += io/rdwr/adler32_stream.cc
+SOURCES += io/rdwr/compare_file_rd_stream.cc
 SOURCES += io/rdwr/bzip2_file_rdwr_stream.cc
 SOURCES += io/rdwr/raw_file_rdwr_stream.cc
 SOURCES += io/rdwr/rdwr_stream.cc
@@ -600,21 +610,6 @@ SOURCES += vehicle/vehicle_base.cc
 SOURCES += vehicle/water_vehicle.cc
 
 
-ifeq ($(BACKEND),allegro)
-  SOURCES += sys/simsys_d.cc
-  SOURCES += sound/allegro_sound.cc
-  SOURCES += music/allegro_midi.cc
-  ifeq ($(ALLEGRO_CONFIG),)
-    ALLEGRO_CFLAGS  :=
-    ALLEGRO_LDFLAGS := -lalleg
-  else
-    ALLEGRO_CFLAGS  := $(shell $(ALLEGRO_CONFIG) --cflags)
-    ALLEGRO_LDFLAGS := $(shell $(ALLEGRO_CONFIG) --libs)
-  endif
-  CFLAGS += $(ALLEGRO_CFLAGS) -DUSE_SOFTPOINTER
-  LIBS   += $(ALLEGRO_LDFLAGS)
-endif
-
 ifeq ($(BACKEND),gdi)
   SOURCES += sys/simsys_w.cc
   SOURCES += sound/win32_sound_xa.cc
@@ -642,7 +637,9 @@ ifeq ($(BACKEND),sdl)
   else
     SOURCES   += sound/sdl_sound.cc
     ifneq ($(OSTYPE),mingw)
-      SOURCES += music/no_midi.cc
+      ifeq ($(USE_FLUIDSYNTH_MIDI), 0)
+        SOURCES += music/no_midi.cc
+      endif
     else
       SOURCES += music/w32_midi.cc
     endif
@@ -767,7 +764,11 @@ CFLAGS += -DCOLOUR_DEPTH=$(COLOUR_DEPTH)
 
 ifeq ($(OSTYPE),mingw)
   SOURCES += simres.rc
-  WINDRES ?= windres
+  ifneq ($(REV),)
+    WINDRES ?= windres -DREVISION=$(REV)
+  else
+    WINDRES ?= windres -DREVISION
+  endif
 endif
 
 CCFLAGS  += $(CFLAGS)
@@ -796,6 +797,9 @@ makeobj:
 nettool:
 	@echo "Building nettool"
 	$(Q)$(MAKE) -e -C nettools FLAGS="$(FLAGS)"
+
+test: simutrans
+	$(PROGDIR)/$(PROG) -set_workdir $(shell pwd)/simutrans -objects pak -scenario automated-tests -debug 2 -lang en -fps 100
 
 clean:
 	@echo "===> Cleaning up"

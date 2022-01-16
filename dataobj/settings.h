@@ -101,9 +101,6 @@ private:
 
 	uint16 station_coverage_size;
 
-	// convois depart even if not unloaded if the time is up
-	bool departures_on_time;
-
 	// the maximum length of each convoi
 	uint8 max_rail_convoi_length;
 	uint8 max_road_convoi_length;
@@ -314,6 +311,9 @@ private:
 	// true if companies can make ways public
 	bool disable_make_way_public;
 
+	// only for trains. If true, trains stop at the position designated in the schdule..
+	bool stop_halt_as_scheduled;
+
 public:
 	/* the big cost section */
 	sint32 maint_building; // normal building
@@ -387,15 +387,14 @@ public:
 	void copy_city_road(settings_t const& other);
 
 	// init from this file ...
-	void parse_simuconf(tabfile_t& simuconf, sint16& disp_width, sint16& disp_height, bool& fullscreen, std::string& objfilename);
+	void parse_simuconf(tabfile_t& simuconf, sint16& disp_width, sint16& disp_height, sint16& fullscreen, std::string& objfilename);
 
 	// init without screen parameters ...
 	void parse_simuconf(tabfile_t& simuconf) {
 		sint16 idummy = 0;
-		bool bdummy = false;
 		std::string sdummy;
 
-		parse_simuconf(simuconf, idummy, idummy, bdummy, sdummy);
+		parse_simuconf(simuconf, idummy, idummy, idummy, sdummy);
 	}
 
 	void parse_colours(tabfile_t& simuconf);
@@ -657,8 +656,8 @@ public:
 	uint32 get_default_ai_construction_speed() const { return default_ai_construction_speed; }
 	void set_default_ai_construction_speed( uint32 n ) { default_ai_construction_speed = n; }
 
-	bool get_departures_on_time() const { return departures_on_time; }
-	void set_departures_on_time(bool b) { departures_on_time = b; }
+	bool get_stop_halt_as_scheduled() const { return stop_halt_as_scheduled; }
+	void set_stop_halt_as_scheduled(bool b) { stop_halt_as_scheduled = b; }
 };
 
 #endif

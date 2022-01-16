@@ -9,6 +9,7 @@ class factorysearcher_t extends manager_t
 	froot = null    // factory_x, complete this tree
 	method = -1
 	factory_iterator = null
+	factory_list     = null
 
 	constructor()
 	{
@@ -33,12 +34,33 @@ class factorysearcher_t extends manager_t
 
 	function factory_iteration()
 	{
-		local list = factory_list_x()
-		foreach(factory in list) {
+		factory_list = []
+		// copy list of end-consumers
+		foreach(factory in factory_list_x()) {
 			if (factory.output.len() == 0) {
-				yield factory
+				factory_list.append(factory)
 			}
 		}
+		// shuffle
+		for(local i=0; i<factory_list.len(); i++) {
+			local j = myrand(factory_list.len())
+			// swap
+			local f = factory_list[i]
+			factory_list[i] = factory_list[j]
+			factory_list[j] = f
+		}
+		// now iterate
+		foreach (factory in factory_list) {
+			yield factory
+		}
+	}
+
+	function _save()
+	{
+		// dont save the list, generate new one
+		factory_iterator = null
+		factory_list     = null
+		return base._save()
 	}
 
 	function work()
@@ -94,20 +116,16 @@ class factorysearcher_t extends manager_t
 		}
 		else {
 			// demand-driven method
-
-			// plan root tree
-			if (froot  &&  plan_increase_consumption(froot) <= 0) {
-				froot = null
+			if (froot == null) {
+				froot = get_next_end_consumer()
 			}
 
-			// determine new root
-			if (froot == null) {
-				local fab
-				if (fab = get_next_end_consumer()) {
-					local n = plan_increase_consumption(fab)
-
-					return r_t( n>0  ? RT_PARTIAL_SUCCESS : RT_SUCCESS)
+			if (froot) {
+				local n = plan_increase_consumption(froot)
+				if (n==0  &&  count_missing_factories(froot) <= 0) {
+					froot = null
 				}
+				return r_t( n>0  ? RT_PARTIAL_SUCCESS : RT_SUCCESS)
 			}
 		}
 		return r_t(RT_SUCCESS)
@@ -496,6 +514,8 @@ class factorysearcher_t extends manager_t
  */
 function check_factory_link_line(f_src, f_dest, t_good) {
 
+	local print_message_box = 0
+
 	local good_list_in = [];
 	local g_count_in = 0
 		foreach(good, islot in f_dest.input) {
@@ -551,20 +571,21 @@ function check_factory_link_line(f_src, f_dest, t_good) {
 					local consumers_links = 0
 					for ( local i = 0; i < consumers.len(); i++ ) {
 						if ( check_factory_links(f_dest, consumers[i], good_list_out[j]) == 0 ) {
-							gui.add_message_at(our_player, " link check consumers " + consumers[i].get_name() + " good " + good_list_out[j], world.get_time())
+
+							if ( print_message_box == 1 ) { gui.add_message_at(our_player, " link check consumers " + consumers[i].get_name() + " good " + good_list_out[j], world.get_time()) }
 
 							// test to other supliers for this good
 							g_count_in = 0
 							foreach(good, islot in consumers[i].input) {
 								//if ( good == t_good ) {
 								if ( good == good_list_out[j] ) {
-									gui.add_message_at(our_player, " consumers " + consumers[i].get_name() + " good " + good, world.get_time())
+									if ( print_message_box == 1 ) { gui.add_message_at(our_player, " consumers " + consumers[i].get_name() + " good " + good, world.get_time()) }
 									// test for in-storage or in-transit goods
 									local st = islot.get_storage()
 									local it = islot.get_in_transit()
 									//gui.add_message_at(our_player, "### " + fab.get_name() + " ## " + good + " ## get_storage() " + st[0] + " get_in_transit() " + it[0], world.get_time())
 									if (st[0] + st[1] + it[0] + it[1] > 0 && good_list_out[j] == good) {
-										gui.add_message_at(our_player, " good_list_out[j] " + good_list_out[j] + " good " + good, world.get_time())
+										if ( print_message_box == 1 ) { gui.add_message_at(our_player, " good_list_out[j] " + good_list_out[j] + " good " + good, world.get_time()) }
 										// something stored/in-transit in last and current month
 										// no need to search for more supply
 										g_count_in++
@@ -574,7 +595,7 @@ function check_factory_link_line(f_src, f_dest, t_good) {
 									foreach(c in consumers[i].get_suppliers()) {
 										suppliers.append( factory_x(c.x, c.y) );
 									}
-									gui.add_message_at(our_player, " suppliers " + consumers[i].get_name() + " count " + suppliers.len(), world.get_time())
+									if ( print_message_box == 1 ) { gui.add_message_at(our_player, " suppliers " + consumers[i].get_name() + " count " + suppliers.len(), world.get_time()) }
 
 									for ( local k = 0; k < suppliers.len(); k++ ) {
 										if ( check_factory_links(consumers[i], suppliers[k], good_list_out[j]) > 0 ) {
@@ -583,13 +604,13 @@ function check_factory_link_line(f_src, f_dest, t_good) {
 
 										foreach(good, islot in suppliers[k].input) {
 											//if ( good_list_out[j] == good ) {
-												gui.add_message_at(our_player, " supplier " + suppliers[k].get_name() + " good " + good, world.get_time())
+												if ( print_message_box == 1 ) { gui.add_message_at(our_player, " supplier " + suppliers[k].get_name() + " good " + good, world.get_time()) }
 												// test for in-storage or in-transit goods
 												local st = islot.get_storage()
 												local it = islot.get_in_transit()
 												//gui.add_message_at(our_player, "### " + suppliers[k].get_name() + " ## " + good + " ## get_storage() " + st[0] + " get_in_transit() " + it[0], world.get_time())
 												if (st[0] + st[1] + it[0] + it[1] > 0 ) {
-													gui.add_message_at(our_player, "### " + suppliers[k].get_name() + " ## " + good + " ## get_storage() st[0] " + st[0] + " get_in_transit() it[0] " + it[0], world.get_time())
+													if ( print_message_box == 1 ) { gui.add_message_at(our_player, "### " + suppliers[k].get_name() + " ## " + good + " ## get_storage() st[0] " + st[0] + " get_in_transit() it[0] " + it[0], world.get_time()) }
 													// something stored/in-transit in last and current month
 													// no need to search for more supply
 													g_count_in++
@@ -601,7 +622,7 @@ function check_factory_link_line(f_src, f_dest, t_good) {
 									//}
 
 
-									gui.add_message_at(our_player, " g_count_in " + g_count_in + " consumers_links " + consumers_links, world.get_time())
+									if ( print_message_box == 1 ) { gui.add_message_at(our_player, " g_count_in " + g_count_in + " consumers_links " + consumers_links, world.get_time()) }
 									if ( g_count_in > 0 && consumers_links == 0 ) {
 										o = false
 										//::debug.pause()

@@ -29,6 +29,9 @@ class plainstring;
 class loadsave_t
 {
 private:
+	// during reading, a fatal error will rename the file to "oldnam"-error, so one can try again
+	void NORETURN fatal(const char* who, const char* format, ...);
+
 	struct buf_t
 	{
 		size_t pos;
@@ -64,8 +67,9 @@ protected:
 	unsigned curr_buff;
 	buf_t buff[2];
 
-	int ident;              // only for XML formatting
+	int indent;              // only for XML formatting
 	file_info_t finfo;
+	std::string filename;
 
 	rdwr_stream_t *stream;
 
@@ -75,8 +79,9 @@ protected:
 	/// @sa getc
 	inline int lsgetc();
 
-	size_t write(const void * buf, size_t len);
 	size_t read(void *buf, size_t len);
+	size_t write(const void *buf, size_t len);
+	void write_indent();
 
 	void rdwr_xml_number(sint64 &s, const char *typ);
 
@@ -162,8 +167,9 @@ public:
 	// s is a malloc-ed string (will be freed and newly allocated on load time!)
 	void rdwr_str(const char *&s);
 
-	// s is a buf of size given
-	void rdwr_str(char* s, size_t size);
+	/// @p s is a buf of size given
+	/// @p size includes space for the trailing 0
+	void rdwr_str(char *s, size_t size);
 
 	/**
 	 * Read/Write plainstring.
@@ -190,14 +196,37 @@ public:
 			x = (X)int_x;
 		}
 	}
+
+	friend class compare_loadsave_t; // to access stream
 };
 
 
-// this produced semicautomatic hierarchies
-class xml_tag_t {
+/**
+ * Class used to produce hash of savegame_version
+ */
+class stream_loadsave_t : public loadsave_t
+{
+public:
+	stream_loadsave_t(rdwr_stream_t *stream);
+};
+
+/**
+ * Class used to compare two savegames
+ */
+class compare_loadsave_t : public loadsave_t
+{
+public:
+	compare_loadsave_t(loadsave_t *file1, loadsave_t *file2);
+	~compare_loadsave_t();
+};
+
+// this produces semi-automatic hierarchies
+class xml_tag_t
+{
 private:
 	loadsave_t *file;
 	const char *tag;
+
 public:
 	xml_tag_t( loadsave_t *f, const char *t ) : file(f), tag(t) { file->start_tag(tag); }
 	~xml_tag_t() { file->end_tag(tag); }

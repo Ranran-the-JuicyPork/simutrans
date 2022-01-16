@@ -216,71 +216,68 @@ sint64 tabfileobj_t::get_int64(const char *key, sint64 def)
 }
 
 
-int *tabfileobj_t::get_ints(const char *key)
+vector_tpl<int> tabfileobj_t::get_ints(const char *key)
 {
 	const char *value = get_string(key,NULL);
 	const char *tmp;
-	int         count = 1;
-	int         *result;
+	int         count = 0;
+	vector_tpl<int> result;
 
 	if(!value) {
-		result = new int[1];
-		result[0] = 0;
 		return result;
 	}
+
 	// Determine number
 	for(tmp = value; *tmp; tmp++) {
 		if(*tmp == ',') {
 			count++;
 		}
 	}
-	// Create result vector and fill
-	result = new int[count + 1];
 
-	result[0] = count;
-	count = 1;
-	result[count++] = strtol( value, NULL, 0 );
+	// Create result vector and fill
+	result.resize(count);
+	result.append(strtol( value, NULL, 0 ));
+
 	for(tmp = value; *tmp; tmp++) {
 		if(*tmp == ',') {
 			// skip spaces/tabs
 			do {
 				tmp ++;
 			} while ( *tmp>0  &&  *tmp<=32  );
+
 			// this inputs also hex correct
-			result[count++] = strtol( tmp, NULL, 0 );
+			result.append(strtol( tmp, NULL, 0 ));
 		}
 	}
 	return result;
 }
 
 
-sint64 *tabfileobj_t::get_sint64s(const char *key)
+vector_tpl<sint64> tabfileobj_t::get_sint64s(const char *key)
 {
 	const char *value = get_string(key,NULL);
 	const char *tmp;
-	int         count = 1;
-	sint64         *result;
+	int         count = 0;
+	vector_tpl<sint64> result;
 
 	if(!value) {
-		result = new sint64[1];
-		result[0] = 0;
 		return result;
 	}
+
 	// Determine number
 	for(tmp = value; *tmp; tmp++) {
 		if(*tmp == ',') {
 			count++;
 		}
 	}
-	// Create result vector and fill
-	result = new sint64[count + 1];
 
-	result[0] = count;
-	count = 1;
-	result[count++] = atosint64(value);
+	// Create result vector and fill
+	result.resize(count);
+	result.append(atosint64(value));
+
 	for(tmp = value; *tmp; tmp++) {
 		if(*tmp == ',') {
-			result[count++] = atosint64(tmp + 1);
+			result.append(atosint64(tmp + 1));
 		}
 	}
 	return result;
@@ -464,7 +461,7 @@ bool tabfile_t::read(tabfileobj_t &objinfo, FILE *fp)
 							strcpy(delim_expand, delim);
 						}
 
-						printf("%s = %s\n", line_expand, delim_expand);
+						dbg->message("tabfile_t::read", "Parameter expansion %s = %s\n", line_expand, delim_expand);
 						objinfo.put(line_expand, delim_expand);
 						if (fp != NULL) {
 							fprintf(fp, "%s=%s\n", line_expand, delim_expand);
@@ -549,7 +546,7 @@ int tabfile_t::find_parameter_expansion(char *key, char *data, int *parameters, 
 		else if (!isalpha(*s) && !isdigit(*s) && *s != '_' && *s != '.') {
 			// only allow [a-zA-Z0-9_.] in keys ('.' is required for city rules)
 			dbg->error("tabfile_t::find_parameter_expansion",
-				"Found invalid character %c in key of parameter expansion (Only alphanumeric characters, '.' and '_' allowed)", *s);
+				"Found invalid character '%c' in key of parameter expansion (Only alphanumeric characters, '.' and '_' allowed)", *s);
 			return 0;
 		}
 	}

@@ -178,10 +178,6 @@ void tunnel_t::finish_rd()
 			weg->set_max_speed(desc->get_topspeed());
 			player_t::add_maintenance( player, -weg->get_desc()->get_maintenance(), weg->get_desc()->get_finance_waytype());
 		}
-		leitung_t *lt = gr->get_leitung();
-		if(lt) {
-			player_t::add_maintenance( player, -lt->get_desc()->get_maintenance(), powerline_wt );
-		}
 		player_t::add_maintenance( player,  desc->get_maintenance(), desc->get_finance_waytype() );
 	}
 }
@@ -227,7 +223,7 @@ void tunnel_t::set_foreground_image( image_id b )
 // players can remove public owned ways
 const char *tunnel_t::is_deletable(const player_t *player)
 {
-	if (get_player_nr()==welt->get_public_player()->get_player_nr()) {
+	if (get_owner_nr()==PUBLIC_PLAYER_NR) {
 		return NULL;
 	}
 	else {

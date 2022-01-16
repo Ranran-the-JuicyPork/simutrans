@@ -911,13 +911,11 @@ char* haltestelle_t::create_name(koord const k, char const* const typ)
 // add convoi to loading
 void haltestelle_t::request_loading( convoihandle_t cnv )
 {
-	if(  !loading_here.is_contained( cnv )  ) {
-		loading_here.append( cnv );
-	}
+	loading_here.append_unique( cnv );
 	if(  last_loading_step != welt->get_steps()  ) {
 		last_loading_step = welt->get_steps();
 		// now iterate over all convois
-		for(  slist_tpl<convoihandle_t>::iterator i = loading_here.begin(), end = loading_here.end();  i != end;  ) {
+		for(  vector_tpl<convoihandle_t>::iterator i = loading_here.begin(); i != loading_here.end();  ) {
 			convoihandle_t const c = *i;
 			if (c.is_bound() && c->get_state() == convoi_t::LOADING) {
 				// now we load into convoi
@@ -2370,7 +2368,8 @@ void haltestelle_t::get_short_freight_info(cbuffer_t & buf) const
 					buf.append(", ");
 				}
 
-				buf.printf("%d%s %s", summe, translator::translate(wtyp->get_mass()), translator::translate(wtyp->get_name()));
+				int max = get_capacity( i>2?2:i );
+				buf.printf("%d(%d)%s %s", summe, max, translator::translate(wtyp->get_mass()), translator::translate(wtyp->get_name()));
 
 				got_one = true;
 			}
@@ -2761,6 +2760,10 @@ void haltestelle_t::rdwr(loadsave_t *file)
 
 	if(file->is_loading()) {
 		owner = welt->get_player(owner_n);
+		if (!owner) {
+			dbg->fatal("haltestelle_t::rdwr", "Halt (%hu) has no owner!", self.get_id());
+		}
+
 		k.rdwr( file );
 		while(k!=koord3d::invalid) {
 			grund_t *gr = welt->lookup(k);
@@ -2967,6 +2970,7 @@ void haltestelle_t::finish_rd()
 	}
 	recalc_status();
 	reconnect_counter = welt->get_schedule_counter()-1;
+	last_search_origin = halthandle_t();
 }
 
 
@@ -3071,6 +3075,8 @@ void haltestelle_t::display_status(sint16 xpos, sint16 ypos)
 			count++;
 		}
 	}
+	ypos += -D_WAITINGBAR_WIDTH - LINESPACE/6;
+
 	if(  count != last_bar_count  ) {
 		// bars will shift x positions, mark entire station bar region dirty
 		scr_coord_val max_bar_height = 0;
@@ -3080,7 +3086,7 @@ void haltestelle_t::display_status(sint16 xpos, sint16 ypos)
 			}
 		}
 		const scr_coord_val x = xpos - (last_bar_count * D_WAITINGBAR_WIDTH - get_tile_raster_width()) / 2;
-		mark_rect_dirty_wc( x - 1 - D_WAITINGBAR_WIDTH, ypos - 11 - max_bar_height - 6, x + last_bar_count * D_WAITINGBAR_WIDTH + 12 - 2, ypos - 11 );
+		mark_rect_dirty_wc( x - 1 - D_WAITINGBAR_WIDTH, ypos, x + last_bar_count * D_WAITINGBAR_WIDTH + 12 - 2, ypos - 11 );
 
 		// reset bar heights for new count
 		last_bar_height.clear();
@@ -3091,7 +3097,6 @@ void haltestelle_t::display_status(sint16 xpos, sint16 ypos)
 		last_bar_count = count;
 	}
 
-	ypos -= D_LABEL_HEIGHT/2 +D_WAITINGBAR_WIDTH;
 	xpos -= (count * D_WAITINGBAR_WIDTH - get_tile_raster_width()) / 2;
 	const int x = xpos;
 

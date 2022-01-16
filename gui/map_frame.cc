@@ -75,7 +75,6 @@ public:
 	void draw(scr_coord offset) OVERRIDE
 	{
 		scr_coord pos = get_pos() + offset;
-		display_ddd_box_clip_rgb( pos.x, pos.y+D_GET_CENTER_ALIGN_OFFSET(D_INDICATOR_BOX_HEIGHT,LINESPACE), D_INDICATOR_BOX_WIDTH, D_INDICATOR_HEIGHT, color_idx_to_rgb(MN_GREY0), color_idx_to_rgb(MN_GREY4) );
 		display_fillbox_wh_clip_rgb( pos.x, pos.y+D_GET_CENTER_ALIGN_OFFSET(D_INDICATOR_BOX_HEIGHT,LINESPACE), D_INDICATOR_BOX_WIDTH, D_INDICATOR_BOX_HEIGHT, color, false );
 		label.draw( pos+scr_size(D_INDICATOR_BOX_WIDTH+D_H_SPACE,0) );
 	}
@@ -387,45 +386,21 @@ void map_frame_t::update_buttons()
 
 static bool compare_factories(const factory_desc_t *const a, const factory_desc_t *const b)
 {
-	if (a->get_supplier_count() == 0) {
-		// a source
-		if (b->get_supplier_count() > 0) {
-			return true;
-		}
-		else {
-			// both producer, sort by name
-			return strcmp(translator::translate(a->get_name()), translator::translate(b->get_name())) < 0;
-		}
+	const bool a_producer_only = a->get_supplier_count() == 0;
+	const bool b_producer_only = b->get_supplier_count() == 0;
+	const bool a_consumer_only = a->get_product_count() == 0;
+	const bool b_consumer_only = b->get_product_count() == 0;
+
+	if (a_producer_only != b_producer_only) {
+		return a_producer_only; // producers to the front
+	}
+	else if (a_consumer_only != b_consumer_only) {
+		return !a_consumer_only; // consumers to the end
 	}
 	else {
-		// a not source
-		if (b->get_supplier_count() == 0) {
-			// b source, in front
-			return false;
-		}
-		else {
-			if (a->get_product_count() == 0) {
-				// a consumer
-				if (b->get_product_count() > 0) {
-					// b factory, in front
-					return false;
-				}
-				else {
-					// both consumer, sort by name
-					return strcmp(translator::translate(a->get_name()), translator::translate(b->get_name())) < 0;
-				}
-			}
-			else {
-				// a factory
-				if (b->get_product_count() == 0) {
-					// b producer to end
-					return true;
-				}
-			}
-		}
+		// both of same type, sort by name
+		return strcmp(translator::translate(a->get_name()), translator::translate(b->get_name())) < 0;
 	}
-	// both factory, sort by name
-	return strcmp(translator::translate(a->get_name()), translator::translate(b->get_name())) < 0;
 }
 
 
@@ -453,7 +428,7 @@ void map_frame_t::update_factory_legend()
 			}
 		}
 		// now sort
-		
+
 		// add corresponding legend entries
 		FOR(vector_tpl<const factory_desc_t*>, f, factory_types) {
 			directory_container.new_component<legend_entry_t>(f->get_name(), f->get_color());
@@ -619,7 +594,7 @@ void map_frame_t::zoom(bool magnify)
 bool map_frame_t::infowin_event(const event_t *ev)
 {
 	event_t ev2 = *ev;
-	translate_event(&ev2, -scrolly.get_pos().x, -scrolly.get_pos().y-D_TITLEBAR_HEIGHT);
+	ev2.move_origin(scrolly.get_pos() + scr_coord(0, D_TITLEBAR_HEIGHT));
 
 	if(ev->ev_class == INFOWIN) {
 		if(ev->ev_code == WIN_OPEN) {

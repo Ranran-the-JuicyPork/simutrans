@@ -30,7 +30,7 @@ class gui_vehicleinfo_t : public gui_aligned_container_t
 {
 	vehicle_t *v;
 	cbuffer_t freight_info;
-	gui_label_buf_t label_resale, label_friction;
+	gui_label_buf_t label_resale, label_friction, label_freight_summary;
 	gui_textarea_t freight;
 
 public:
@@ -57,8 +57,11 @@ public:
 			add_component(&label_resale);
 			// max income
 			sint64 max_income = - v->get_operating_cost();
-			if(v->get_cargo_max() > 0) {
-				max_income += (v->get_cargo_max() * ware_t::calc_revenue(v->get_cargo_type(), v->get_waytype(), cnv_kmh) )/3000;
+
+			// cnv_kmh == SPEED_UNLIMITED means that meaningful revenue
+			// cannot be calculated yet (e.g. vehicle in depot or stopped at station)
+			if(v->get_cargo_max() > 0 && cnv_kmh != SPEED_UNLIMITED) {
+				max_income += (v->get_cargo_max() * ware_t::calc_revenue(v->get_cargo_type(), v->get_waytype(), cnv_kmh))/3000;
 			}
 			add_table(2,1);
 			{
@@ -77,13 +80,7 @@ public:
 			// friction
 			add_component(&label_friction);
 			if(v->get_cargo_max() > 0) {
-				// freight type
-				goods_desc_t const& g    = *v->get_cargo_type();
-				char const*  const  name = translator::translate(g.get_catg() == 0 ? g.get_name() : g.get_catg_name());
-				gui_label_buf_t* l = new_component<gui_label_buf_t>();
-				l->buf().printf("%u/%u%s %s", v->get_total_cargo(), v->get_cargo_max(), translator::translate(v->get_cargo_mass()), name);
-				l->update();
-				// freight
+				add_component( &label_freight_summary );
 				add_component(&freight);
 			}
 		}
@@ -109,6 +106,12 @@ public:
 		label_friction.buf().printf( "%s %i", translator::translate("Friction:"), v->get_frictionfactor() );
 		label_friction.update();
 		if(v->get_cargo_max() > 0) {
+			// freight type
+			goods_desc_t const& g = *v->get_cargo_type();
+			char const* const  name = translator::translate( g.get_catg() == 0?g.get_name():g.get_catg_name() );
+			label_freight_summary.buf().printf( "%u/%u%s %s", v->get_total_cargo(), v->get_cargo_max(), translator::translate( v->get_cargo_mass() ), name );
+			label_freight_summary.update();
+
 			freight_info.clear();
 			v->get_cargo_info(freight_info);
 		}
@@ -175,7 +178,12 @@ void convoi_detail_t::update_labels()
 	label_odometer.update();
 	label_power.buf().printf( translator::translate("Leistung: %d kW"), cnv->get_sum_power() );
 	label_power.update();
-	label_length.buf().printf("%s %i %s %i", translator::translate("Vehicle count:"), cnv->get_vehicle_count(), translator::translate("Station tiles:"), cnv->get_tile_length());
+	if( cnv->get_vehicle_count()>0  &&  cnv->get_vehikel( 0 )->get_desc()->get_waytype()==water_wt ) {
+		label_length.buf().printf( "%s %i", translator::translate( "Vehicle count:" ), cnv->get_vehicle_count() );
+	}
+	else {
+		label_length.buf().printf( "%s %i %s %i", translator::translate( "Vehicle count:" ), cnv->get_vehicle_count(), translator::translate( "Station tiles:" ), cnv->get_tile_length() );
+	}
 	label_length.update();
 	label_resale.buf().printf("%s ", translator::translate("Restwert:"));
 	label_resale.buf().append_money( cnv->calc_restwert() / 100.0 );

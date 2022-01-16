@@ -636,12 +636,12 @@ private:
 	 * Internal saving method.
 	 */
 	void save(loadsave_t *file, bool silent);
-
+public:
 	/**
 	 * Internal loading method.
 	 */
 	void load(loadsave_t *file);
-
+private:
 	void rdwr_gamestate(loadsave_t *file, loadingscreen_t *ls);
 
 	/**
@@ -707,12 +707,19 @@ private:
 	void update_map_intern(sint16, sint16, sint16, sint16);
 
 public:
+	enum server_announce_type_t
+	{
+		SERVER_ANNOUNCE_HELLO     = 0, ///< my server is now up
+		SERVER_ANNOUNCE_HEARTBEAT = 1, ///< my server is still up
+		SERVER_ANNOUNCE_GOODBYE   = 2, ///< my server is now down
+	};
+
 	/**
 	 * Announce server and current state to listserver.
 	 * @param status Specifies what information should be announced
 	 * or offline (the latter only in cases where it is shutting down)
 	 */
-	void announce_server(int status);
+	void announce_server(server_announce_type_t status);
 
 	/// cache the current maximum and minimum height on the map
 	sint8 max_height, min_height;
@@ -1129,8 +1136,8 @@ public:
 		}
 	}
 
-	void set_mouse_rest_time(uint32 new_val) { mouse_rest_time = new_val; };
-	void set_sound_wait_time(uint32 new_val) { sound_wait_time = new_val; };
+	void set_mouse_rest_time(uint32 new_val) { mouse_rest_time = new_val; }
+	void set_sound_wait_time(uint32 new_val) { sound_wait_time = new_val; }
 
 private:
 	/**
@@ -1601,6 +1608,7 @@ public:
 
 	inline void set_grid_hgt(koord k, sint8 hgt) { set_grid_hgt(k.x, k.y, hgt); }
 
+	void get_height_slope_from_grid(koord k, sint8 &hgt, uint8 &slope);
 
 private:
 	/**
@@ -1791,6 +1799,11 @@ public:
 	 * Called by the server before sending the sync commands.
 	 */
 	uint32 generate_new_map_counter() const;
+
+	/**
+	 * Generates hash of game state by streaming a save to a hash function
+	 */
+	uint32 get_gamestate_hash();
 
 private:
 	void process_network_commands(sint32* ms_difference);

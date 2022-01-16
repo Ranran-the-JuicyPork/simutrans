@@ -141,7 +141,7 @@ void ticker::update()
 
 void ticker::draw()
 {
-	const int start_y = display_get_height() - TICKER_HEIGHT - win_get_statusbar_height() - (env_t::menupos == MENU_BOTTOM) * env_t::iconsize.h;
+	const int start_y = env_t::menupos == MENU_BOTTOM ? win_get_statusbar_height() : display_get_height() - TICKER_HEIGHT - win_get_statusbar_height();
 	if (redraw_all) {
 		redraw();
 		return;
@@ -150,7 +150,7 @@ void ticker::draw()
 		// ticker not visible
 
 		// mark everything at the bottom as dirty to clear also tooltips and compass
-		mark_rect_dirty_wc(0, start_y - 128, display_get_width(), start_y + 128 + TICKER_HEIGHT);
+		mark_rect_dirty_wc(0, env_t::menupos == MENU_BOTTOM ? 0 : start_y - 128, display_get_width(), start_y + 128 + TICKER_HEIGHT);
 		return;
 	}
 
@@ -160,14 +160,14 @@ void ticker::draw()
 	}
 
 	// do partial redraw
-	display_scroll_band( start_y+1, dx_since_last_draw, TICKER_HEIGHT-1 );
-	display_fillbox_wh_rgb(width-dx_since_last_draw-6, start_y+1, dx_since_last_draw+6, TICKER_HEIGHT-1, SYSCOL_TICKER_BACKGROUND, true);
+	display_scroll_band( start_y, dx_since_last_draw, TICKER_HEIGHT );
+	display_fillbox_wh_rgb(width-dx_since_last_draw-6, start_y, dx_since_last_draw+6, TICKER_HEIGHT, SYSCOL_TICKER_BACKGROUND, true);
 
 	// ok, ready for the text
-	PUSH_CLIP( 0, start_y + 1, width - 1, TICKER_HEIGHT-1 );
+	PUSH_CLIP( 0, start_y, width - 1, TICKER_HEIGHT );
 	FOR(slist_tpl<node>, & n, list) {
 		if (n.xpos < width) {
-			display_proportional_clip_rgb(n.xpos, start_y + 2, n.msg, ALIGN_LEFT, n.color, true);
+			display_proportional_clip_rgb(n.xpos, start_y + TICKER_V_SPACE, n.msg, ALIGN_LEFT, n.color, true);
 		}
 	}
 	POP_CLIP();
@@ -180,21 +180,21 @@ void ticker::redraw()
 {
 	set_redraw_all(false);
 	dx_since_last_draw = 0;
-	const int start_y = display_get_height() - TICKER_HEIGHT - win_get_statusbar_height() - ((env_t::menupos == MENU_BOTTOM) * env_t::iconsize.h);
+	const int start_y = env_t::menupos == MENU_BOTTOM ? win_get_statusbar_height() : display_get_height() - TICKER_HEIGHT - win_get_statusbar_height();
 
 	if (list.empty()) {
 		// mark everything at the bottom as dirty to clear also tooltips and compass
-		mark_rect_dirty_wc(0, start_y-128, display_get_width(), start_y + 128 +TICKER_HEIGHT);
+		mark_rect_dirty_wc(0, env_t::menupos == MENU_BOTTOM ? 0 : start_y - 128, display_get_width(), start_y + 128 + TICKER_HEIGHT);
 		return;
 	}
 
 	const int width = display_get_width();
 
 	// just draw the ticker in its colour ... (to be sure ... )
-	display_fillbox_wh_rgb(0, start_y+1, width, TICKER_HEIGHT-1, SYSCOL_TICKER_BACKGROUND, true);
+	display_fillbox_wh_rgb(0, start_y, width, TICKER_HEIGHT, SYSCOL_TICKER_BACKGROUND, true);
 	FOR(slist_tpl<node>, & n, list) {
 		if (n.xpos < width) {
-			display_proportional_clip_rgb(n.xpos, start_y + 2, n.msg, ALIGN_LEFT, n.color, true);
+			display_proportional_clip_rgb(n.xpos, start_y + TICKER_V_SPACE, n.msg, ALIGN_LEFT, n.color, true);
 		}
 	}
 }

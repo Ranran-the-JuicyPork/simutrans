@@ -16,6 +16,7 @@
 #include "../player/simplay.h"
 #include "../gui/simwin.h"
 #include "../simworld.h"
+#include "../simfab.h"
 
 #include "../bauer/wegbauer.h"
 
@@ -40,6 +41,7 @@
 #include "../obj/signal.h"
 #include "../obj/tunnel.h"
 #include "../obj/wayobj.h"
+#include "../obj/zeiger.h"
 
 #include "../gui/ground_info.h"
 #include "../gui/minimap.h"
@@ -589,7 +591,7 @@ void grund_t::info(cbuffer_t& buf) const
 	if(!is_water()) {
 		if(flags&has_way1) {
 			// bridges / tunnels only carry dummy ways
-			if(!ist_tunnel()  &&  !ist_bruecke()) {
+			if(ist_tunnel()  ||  ist_bruecke()) {
 				buf.append(translator::translate(get_weg_nr(0)->get_name()));
 				buf.append("\n");
 			}
@@ -608,9 +610,8 @@ void grund_t::info(cbuffer_t& buf) const
 			}
 			if (maker) {
 				buf.printf(translator::translate("Constructed by %s"), maker);
-				buf.append("\n");
+				buf.append("\n\n");
 			}
-			buf.append("\n");
 			// second way
 			if(flags&has_way2) {
 				buf.append(translator::translate(get_weg_nr(1)->get_name()));
@@ -623,9 +624,8 @@ void grund_t::info(cbuffer_t& buf) const
 				}
 			}
 		}
+		buf.append(translator::translate(ground_desc_t::get_climate_name_from_bit(welt->get_climate(get_pos().get_2d()))));
 	}
-
-	buf.printf("%s\n%s", get_name(), translator::translate( ground_desc_t::get_climate_name_from_bit( welt->get_climate( get_pos().get_2d() ) ) ) );
 #if MSG_LEVEL >= 4
 	buf.printf("\nflags $%0X", flags );
 	buf.printf("\n\npos: (%s)",pos.get_str());
@@ -1661,16 +1661,17 @@ void display_text_label(sint16 xpos, sint16 ypos, const char* text, const player
 	sint16 pc = player ? player->get_player_color1()+4 : SYSCOL_TEXT_HIGHLIGHT;
 	switch( env_t::show_names >> 2 ) {
 		case 0:
-			display_ddd_proportional_clip( xpos, ypos, proportional_string_width(text)+7, 0, color_idx_to_rgb(pc), color_idx_to_rgb(COL_BLACK), text, dirty );
+			display_ddd_proportional_clip( xpos, ypos, color_idx_to_rgb(pc), color_idx_to_rgb(COL_BLACK), text, dirty );
 			break;
 		case 1:
-			display_outline_proportional_rgb( xpos, ypos-(LINESPACE/2), color_idx_to_rgb(pc+3), color_idx_to_rgb(COL_BLACK), text, dirty );
+			display_outline_proportional_rgb( xpos, ypos, color_idx_to_rgb(pc+3), color_idx_to_rgb(COL_BLACK), text, dirty );
 			break;
-		case 2:
-			display_outline_proportional_rgb( xpos + LINESPACE + D_H_SPACE, ypos-(LINESPACE/2),   color_idx_to_rgb(COL_YELLOW), color_idx_to_rgb(COL_BLACK), text, dirty );
-			display_ddd_box_clip_rgb(         xpos,                         ypos-(LINESPACE/2),   LINESPACE,   LINESPACE,   color_idx_to_rgb(pc-2), PLAYER_FLAG|color_idx_to_rgb(pc+2) );
-			display_fillbox_wh_rgb(           xpos+1,                       ypos-(LINESPACE/2)+1, LINESPACE-2, LINESPACE-2, color_idx_to_rgb(pc), dirty );
+		case 2: {
+			display_outline_proportional_rgb( xpos + LINESPACE + D_H_SPACE, ypos,   color_idx_to_rgb(COL_YELLOW), color_idx_to_rgb(COL_BLACK), text, dirty );
+			display_ddd_box_clip_rgb(         xpos,                         ypos,   LINESPACE,   LINESPACE,   color_idx_to_rgb(pc-2), PLAYER_FLAG|color_idx_to_rgb(pc+2) );
+			display_fillbox_wh_rgb(           xpos+1,                       ypos+1, LINESPACE-2, LINESPACE-2, color_idx_to_rgb(pc), dirty );
 			break;
+		}
 	}
 }
 
@@ -1699,6 +1700,66 @@ void grund_t::display_overlay(const sint16 xpos, const sint16 ypos)
 			const halthandle_t halt = get_halt();
 			if(halt.is_bound()  &&  halt->get_basis_pos3d()==pos) {
 				halt->display_status(xpos, ypos);
+			}
+		}
+	}
+
+	if( env_t::show_factory_storage_bar ) {
+		if( gebaeude_t *gb=find<gebaeude_t>() ) {
+			if(  fabrik_t* fab = gb->get_fabrik()  ) {
+				if( env_t::show_factory_storage_bar == 1  &&  welt->get_zeiger()->get_pos() == get_pos() ) {
+					const sint16 raster_tile_width = get_tile_raster_width();
+					const char* text = fab->get_name();
+					const int width = proportional_string_width( text )+7;
+					sint16 new_xpos = xpos - (width-raster_tile_width)/2;
+					sint16 new_ypos = ypos + 5;
+//					display_text_label( new_xpos, new_ypos, text, fab->get_owner(), dirty );
+					// ... and status
+					fab->display_status( xpos, new_ypos );
+					win_set_tooltip( new_xpos, ypos, fab->get_name(), NULL, NULL );
+				}
+				else if(  gb->get_first_tile() == gb  ) {
+					if(  env_t::show_factory_storage_bar == 3  ||  (env_t::show_factory_storage_bar == 2  &&  fab->is_within_players_network( welt->get_active_player() ))  ) {
+						// name of factory
+						const char* text = fab->get_name();
+						const sint16 raster_tile_width = get_tile_raster_width();
+						const sint16 width = proportional_string_width( text )+7;
+						sint16 new_xpos = xpos - (width-raster_tile_width)/2;
+						display_text_label( new_xpos, ypos, text, fab->get_owner(), dirty );
+						// ... and status
+						fab->display_status( xpos, ypos );
+					}
+				}
+			}
+		}
+	}
+
+	if( schiene_t::show_reservations &&  hat_wege()  ) {
+		if( weg_t* w = get_weg_nr( 0 ) ) {
+			if( w->has_signal() ) {
+				// display arrow here
+				PIXVAL c1 = color_idx_to_rgb( COL_GREEN+2 );
+				PIXVAL c2 = color_idx_to_rgb( COL_GREEN );
+
+				ribi_t::ribi mask = w->get_ribi_maske();
+				if( !mask ) {
+					mask = w->get_ribi_unmasked();
+				}
+
+				if( signal_t* sig = find<signal_t>() ) {
+					if( sig->get_state()==roadsign_t::signalstate::STATE_RED ) {
+						c1 = color_idx_to_rgb( COL_ORANGE+2 );
+						c2 = color_idx_to_rgb( COL_ORANGE );
+					}
+				}
+				display_signal_direction_rgb( xpos, ypos + tile_raster_scale_y( w->get_yoff(), get_current_tile_raster_width() ),
+					w->get_ribi_unmasked(), mask, c1, c2, w->is_diagonal(), get_weg_hang() );
+			}
+			else if( w->get_ribi_maske() ) {
+				PIXVAL c1 = color_idx_to_rgb( COL_BLUE+2 );
+				PIXVAL c2 = color_idx_to_rgb( COL_BLUE );
+				display_signal_direction_rgb( xpos, ypos + tile_raster_scale_y( w->get_yoff(), get_current_tile_raster_width() ),
+					w->get_ribi_unmasked(), w->get_ribi_maske(), c1, c2, w->is_diagonal(), get_weg_hang() );
 			}
 		}
 	}
@@ -1811,9 +1872,9 @@ sint64 grund_t::neuen_weg_bauen(weg_t *weg, ribi_t::ribi ribi, player_t *player)
 			weg_t *other = (weg_t *)obj_bei(0);
 			// another way will be added
 			if(flags&has_way2) {
-				dbg->fatal("grund_t::neuen_weg_bauen()","cannot built more than two ways on %i,%i,%i!",pos.x,pos.y,pos.z);
-				return 0;
+				dbg->fatal("grund_t::neuen_weg_bauen()","cannot build more than two ways on %i,%i,%i!",pos.x,pos.y,pos.z);
 			}
+
 			// add the way
 			objlist.add( weg );
 			weg->set_ribi(ribi);
@@ -2118,4 +2179,12 @@ wayobj_t *grund_t::get_wayobj( waytype_t wt ) const
 		}
 	}
 	return NULL;
+}
+
+
+bool grund_t::is_dummy_ground() const
+{
+	return (get_typ() == grund_t::tunnelboden  ||  get_typ() == grund_t::monorailboden)
+		&&  !hat_wege()
+		&&  get_leitung() == NULL;
 }

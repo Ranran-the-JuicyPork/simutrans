@@ -26,8 +26,8 @@
 #include "../pathes.h"
 #include "../simevent.h"
 #include "../utils/simstring.h"
+#include "../simdebug.h"
 #include "../simevent.h"
-
 
 #ifdef _WIN32
 #	include <locale>
@@ -46,6 +46,9 @@
 #	include <dirent.h>
 #	if !defined __AMIGA__ && !defined __BEOS__
 #		include <unistd.h>
+#	endif
+#	ifdef __ANDROID__
+#		include <SDL2/SDL.h>
 #	endif
 #endif
 
@@ -389,14 +392,17 @@ char const *dr_query_homedir()
 	BPath userDir;
 	find_directory(B_USER_DIRECTORY, &userDir);
 	sprintf(buffer, "%s/simutrans", userDir.Path());
+#elif defined __ANDROID__
+	tstrncpy(buffer,SDL_GetPrefPath("Simutrans Team","simutrans"),lengthof(buffer));
 #else
 	sprintf(buffer, "%s/simutrans", getenv("HOME"));
 #endif
 
 	// create directory and subdirectories
 	dr_mkdir(buffer);
+#ifndef __ANDROID__
 	strcat(buffer, PATH_SEPARATOR);
-
+#endif
 	return buffer;
 }
 
@@ -961,7 +967,7 @@ const char *dr_get_locale_string()
 	}
 	return NULL;
 }
-#elif __HAIKU__
+#elif defined(__HAIKU__) && __HAIKU__
 #include <Message.h>
 #include <LocaleRoster.h>
 
@@ -1007,6 +1013,10 @@ void dr_fatal_notify(char const* const msg)
 #ifdef _WIN32
 	MessageBoxA(0, msg, "Fatal Error", MB_ICONEXCLAMATION);
 #endif
+
+#ifdef __ANDROID__
+	dbg->error(__FUNCTION__, msg);
+#endif
 }
 
 /**
@@ -1017,10 +1027,12 @@ void dr_fatal_notify(char const* const msg)
 bool dr_download_pakset( const char *data_dir, bool portable )
 {
 #ifdef _WIN32
-	std::string param(portable ? "/P /D=" : "/D=");
-	param.append(data_dir);
-	U16View const wparam(param.c_str());
+	int old_fullscreen = dr_suspend_fullscreen();
+
 	U16View const wpath_to_program(data_dir);
+	WCHAR wparam[1024];
+	swprintf(wparam, portable ? L"/P /D=%ls" : L"/D=%ls", wpath_to_program);
+
 
 	SHELLEXECUTEINFOW shExInfo;
 	shExInfo.cbSize = sizeof(shExInfo);
@@ -1042,14 +1054,16 @@ bool dr_download_pakset( const char *data_dir, bool portable )
 		WaitForSingleObject( shExInfo.hProcess, INFINITE );
 		CloseHandle( shExInfo.hProcess );
 	}
+	dr_restore_fullscreen(old_fullscreen);
 	return true;
 #else
 	(void)portable;
 
 	char command[2048];
-	chdir( data_dir );
+	dr_chdir( data_dir );
 	sprintf(command, "%s/get_pak.sh", data_dir);
-	system( command );
+	const int retval = system( command );
+	dbg->debug("dr_download_pakset", "Command '%s' returned %d", command, retval);
 	return true;
 #endif
 }
@@ -1057,6 +1071,9 @@ bool dr_download_pakset( const char *data_dir, bool portable )
 
 int sysmain(int const argc, char** const argv)
 {
+	sys_event.type = SIM_NOEVENT;
+	sys_event.code = 0;
+
 #ifdef _WIN32
 	// Guess required buffer length, if too small then dynamically expand up to around 65536 characters.
 	// It is unlikely this loop will ever run more than once in practice but is required to cover flaws with the API.

@@ -22,22 +22,29 @@ fluid_audio_driver_t* adriver;
 fluid_player_t* player;
 
 // Predefined list of paths to search for soundfonts
-static const char * default_sf[] = {
-	/* RedHat/Fedora/Arch preferred */
-	"/usr/share/soundfonts/sf2/default.sf2",
-	"/usr/share/soundfonts/sf2/freepats-general-midi.sf2",
-	"/usr/share/soundfonts/FluidR3_GM.sf2",
-
-	/* Debian/Ubuntu/OpenSUSE preferred */
-	"/usr/share/sounds/sf2/default.sf2",
-	"/usr/share/sounds/sf2/FluidR3_GM.sf2",
-
-	/* Debian/Ubuntu/OpenSUSE alternatives */
-	"/usr/share/sounds/sf2/TimGM6mb.sf2",
-	"/usr/share/sounds/sf2/FluidR3_GS.sf2",
-
-	nullptr
+static const char * default_sf_paths[] = {
+	/* RedHat/Fedora/Arch path */
+	"/usr/share/soundfonts/",
+	/* Debian/Ubuntu/OpenSUSE path */
+	"/usr/share/sounds/sf2/",
+	NULL
 };
+
+// Soundfonts included on linux distros or bundled with Simutrans
+static const char * default_sf_names[] = {
+	"default.sf2",
+	"freepats-general-midi.sf2",
+	"PCLite.sf2",
+	"TimGM6mb.sf2",
+	"FluidR3_GM.sf2",
+	"FluidR3_GS.sf2",
+	NULL
+};
+
+#ifdef __ANDROID__
+/* Fluidsynth on Android is too old and does not export some functions */
+extern "C" int fluid_synth_all_notes_off(fluid_synth_t* synth, int chan);
+#endif
 
 
 /**
@@ -166,19 +173,32 @@ bool dr_load_sf(const char * filename){
 }
 
 
+static void fluid_log(int level, const char *message, void *)
+{
+	switch (level) {
+	case FLUID_PANIC: dbg->fatal("FluidSynth", "%s", message);
+	case FLUID_ERR:   dbg->error("FluidSynth", "%s", message);   break;
+	case FLUID_WARN:  dbg->warning("FluidSynth", "%s", message); break;
+	case FLUID_INFO:  dbg->message("FluidSynth", "%s", message); break;
+	case FLUID_DBG:   dbg->debug("FluidSynth", "%s", message);   break;
+	}
+}
+
+
 bool dr_init_midi()
 {
-	if(  !(settings = new_fluid_settings())  ) {
-		dbg->warning("dr_init_midi()", "FluidSynth: MIDI settings failed.");
-		return false;
-	}
-	fluid_settings_setint( settings, "synth.cpu-cores", env_t::num_threads );
-	fluid_settings_setstr( settings, "synth.midi-bank-select", "gm" );
+	fluid_set_log_function(FLUID_PANIC, fluid_log, NULL);
+	fluid_set_log_function(FLUID_ERR,   fluid_log, NULL);
+	fluid_set_log_function(FLUID_WARN,  fluid_log, NULL);
+	fluid_set_log_function(FLUID_INFO,  fluid_log, NULL);
+	fluid_set_log_function(FLUID_DBG,   fluid_log, NULL);
 
 #ifdef _WIN32
 	std::string fluidsynth_driver = "dsound";
-#elif __APPLE__
+#elif defined(__APPLE__) && __APPLE__
 	std::string fluidsynth_driver = "coreaudio";
+#elif __ANDROID__
+	std::string fluidsynth_driver = "oboe";
 #else
 	std::string fluidsynth_driver = "sdl2";
 
@@ -189,6 +209,14 @@ bool dr_init_midi()
 		}
 	}
 #endif
+
+	if(  !(settings = new_fluid_settings())  ) {
+		dbg->warning("dr_init_midi()", "FluidSynth: MIDI settings failed.");
+		return false;
+	}
+
+	fluid_settings_setint( settings, "synth.cpu-cores", env_t::num_threads );
+	fluid_settings_setstr( settings, "synth.midi-bank-select", "gm" );
 
 	if(  fluid_settings_setstr( settings, "audio.driver", fluidsynth_driver.c_str() ) != FLUID_OK  ) {
 		dbg->warning("dr_init_midi()", "FluidSynth: Set MIDI driver %s failed.", fluidsynth_driver.c_str());
@@ -209,10 +237,20 @@ bool dr_init_midi()
 	if(  dr_load_sf( env_t::soundfont_filename.c_str() ) || dr_load_sf( ((std::string)env_t::data_dir + "music/" + env_t::soundfont_filename).c_str() )  ) {
 		return true;
 	}
-	// Then predefined list of soundfonts
-	for(  int i = 0;  default_sf[i];  i++  ) {
-		if(  dr_load_sf( default_sf[i] )  ) {
+
+	// Bundled soundfonts second
+	for(  int i = 0;  default_sf_names[i];  i++  ) {
+		if(  dr_load_sf( ((std::string)env_t::data_dir + "music/" + (std::string)default_sf_names[i] ).c_str() )  ) {
 			return true;
+		}
+	}
+
+	// System soundfonts at last
+	for(  int i = 0;  default_sf_paths[i];  i++  ) {
+		for(  int j = 0; default_sf_names[j]; j++  ){
+			if(  dr_load_sf(  ((std::string)default_sf_paths[i] + (std::string)default_sf_names[j]).c_str()  )  ) {
+				return true;
+			}
 		}
 	}
 

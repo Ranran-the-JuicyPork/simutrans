@@ -266,7 +266,8 @@ public:
 	tool_schedule_add_t() : tool_t(TOOL_SCHEDULE_ADD | GENERAL_TOOL) {}
 	char const* work(player_t*, koord3d) OVERRIDE;
 	bool is_init_network_safe() const OVERRIDE { return true; }
-	bool is_work_network_safe() const OVERRIDE { return true; }
+//	bool is_work_network_safe() const OVERRIDE { return true; }
+	bool is_work_here_network_safe(player_t*, koord3d) OVERRIDE { return true; }
 };
 
 class tool_schedule_ins_t : public tool_t {
@@ -274,7 +275,8 @@ public:
 	tool_schedule_ins_t() : tool_t(TOOL_SCHEDULE_INS | GENERAL_TOOL) {}
 	char const* work(player_t*, koord3d) OVERRIDE;
 	bool is_init_network_safe() const OVERRIDE { return true; }
-	bool is_work_network_safe() const OVERRIDE { return true; }
+//	bool is_work_network_safe() const OVERRIDE { return true; }
+	bool is_work_here_network_safe(player_t*, koord3d) OVERRIDE { return true; }
 };
 
 class tool_build_way_t : public two_click_tool_t {
@@ -806,6 +808,19 @@ public:
 	bool is_work_network_safe() const OVERRIDE { return true; }
 };
 
+class tool_show_factory_storage_t : public tool_t {
+public:
+	tool_show_factory_storage_t() : tool_t(TOOL_SHOW_FACTORY_STORAGE | SIMPLE_TOOL) {}
+	char const* get_tooltip(player_t const*) const OVERRIDE { return translator::translate("switch the industry storage display mode"); }
+	bool init(player_t *) OVERRIDE {
+		env_t::show_factory_storage_bar = (env_t::show_factory_storage_bar+1) % 4;
+		welt->set_dirty();
+		return false;
+	}
+	bool is_init_network_safe() const OVERRIDE { return true; }
+	bool is_work_network_safe() const OVERRIDE { return true; }
+};
+
 class tool_show_name_t : public tool_t {
 public:
 	tool_show_name_t() : tool_t(TOOL_SHOW_NAME | SIMPLE_TOOL) {}
@@ -892,9 +907,9 @@ public:
 	char const* get_tooltip(player_t const*) const OVERRIDE;
 	bool is_selected() const OVERRIDE;
 	void draw_after(scr_coord, bool dirty) const OVERRIDE;
-	bool init( player_t * ) OVERRIDE;
+	bool init(player_t *) OVERRIDE;
 	char const* work(player_t*, koord3d) OVERRIDE;
-	bool exit(player_t * ) OVERRIDE { return false; }
+	bool exit(player_t *) OVERRIDE;
 	bool is_init_network_safe() const OVERRIDE { return true; }
 	bool is_work_network_safe() const OVERRIDE { return true; }
 };

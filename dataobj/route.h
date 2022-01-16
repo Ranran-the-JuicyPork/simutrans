@@ -13,15 +13,22 @@
 
 #include "../tpl/vector_tpl.h"
 
+
 class karte_t;
 class test_driver_t;
 class grund_t;
+
 
 /**
  * Route, e.g. for vehicles
  */
 class route_t
 {
+public:
+	typedef uint16 index_t;
+
+	static const index_t INVALID_INDEX = 0xFFFA;
+
 private:
 	/**
 	 * The actual route search
@@ -76,7 +83,7 @@ public:
 
 	const koord3d_vector_t &get_route() const { return route; }
 
-	void rotate90( sint16 y_size ) { route.rotate90( y_size ); };
+	void rotate90( sint16 y_size ) { route.rotate90( y_size ); }
 
 
 	bool is_contained(const koord3d &k) const { return route.is_contained(k); }

@@ -6,8 +6,9 @@
 #include <stdio.h>
 
 #include "convoi_info_t.h"
+#include "minimap.h"
 
-#include "../vehicle/vehicle.h"
+#include "../vehicle/rail_vehicle.h"
 #include "../simcolor.h"
 #include "../display/viewport.h"
 #include "../simworld.h"
@@ -95,6 +96,7 @@ void convoi_info_t::init(convoihandle_t cnv)
 	gui_frame_t::set_name(cnv->get_name());
 	gui_frame_t::set_owner(cnv->get_owner());
 
+	minimap_t::get_instance()->set_selected_cnv(cnv);
 	set_table_layout(1,0);
 
 	input.add_listener(this);
@@ -202,7 +204,6 @@ void convoi_info_t::init(convoihandle_t cnv)
 	}
 	container_stats.end_table();
 
-
 	cnv->set_sortby( env_t::default_sortmode );
 
 	// convoy details in tab
@@ -243,8 +244,13 @@ void convoi_info_t::init(convoihandle_t cnv)
 	speed_bar.set_base(max_convoi_speed);
 	speed_bar.set_vertical(false);
 	speed_bar.add_color_value(&mean_convoi_speed, color_idx_to_rgb(COL_GREEN));
+
 	// we update this ourself!
 	route_bar.init(&cnv_route_index, 0);
+	if( cnv->get_vehicle_count()>0  &&  dynamic_cast<rail_vehicle_t *>(cnv->front()) ) {
+		// only for trains etc.
+		route_bar.set_reservation( &next_reservation_index );
+	}
 	route_bar.set_height(9);
 
 	update_labels();
@@ -270,13 +276,6 @@ void convoi_info_t::apply_schedule()
 	if(  (!cnv.is_bound())  ||  (cnv->get_state()!=convoi_t::EDIT_SCHEDULE  &&  cnv->get_state()!=convoi_t::INITIAL)  ) {
 		// no change allowed (one can only enter this state when editing was allowed)
 		return;
-	}
-
-	// if convoy was sent to depot do not override schedule here
-	if(  grund_t* gr=welt->lookup(cnv->get_schedule()->get_current_entry().pos)  ) {
-		if (gr->get_depot() != NULL) {
-			return;
-		}
 	}
 
 	// do not send changes if the convoi is about to be deleted
@@ -354,7 +353,6 @@ void convoi_info_t::init_line_selector()
 		line_scrollitem_t::sort_mode = line_scrollitem_t::SORT_BY_NAME;
 		line_selector.sort(offset);
 		old_line_count = cnv->get_owner()->simlinemgmt.get_line_count();
-		old_schedule_count = scd.get_schedule()->get_count();
 	}
 }
 
@@ -441,6 +439,7 @@ void convoi_info_t::draw(scr_coord pos, scr_size size)
 		destroy_win(this);
 		return;
 	}
+	next_reservation_index = cnv->get_next_reservation_index();
 
 	bool is_change_allowed = cnv->get_owner() == welt->get_active_player()  &&  !welt->get_active_player()->is_locked();
 
@@ -465,6 +464,7 @@ void convoi_info_t::draw(scr_coord pos, scr_size size)
 		init_line_selector();
 		reset_min_windowsize();
 	}
+	old_schedule_count = scd.get_schedule()->get_count();
 
 	line_button.enable( dynamic_cast<line_scrollitem_t*>(line_selector.get_selected_item()) );
 	line_button2.enable( line.is_bound() );
@@ -520,6 +520,7 @@ koord3d convoi_info_t::get_weltpos( bool set )
  */
 bool convoi_info_t::action_triggered( gui_action_creator_t *comp, value_t v)
 {
+	minimap_t::get_instance()->set_selected_cnv(cnv);
 	if(  comp == &line_button  ) {
 		// open selected line as schedule
 		if( line_scrollitem_t* li = dynamic_cast<line_scrollitem_t*>(line_selector.get_selected_item()) ) {
@@ -549,7 +550,6 @@ bool convoi_info_t::action_triggered( gui_action_creator_t *comp, value_t v)
 	bool edit_allowed = (cnv.is_bound() && (cnv->get_owner() == welt->get_active_player() || welt->get_active_player()->is_public_service()));
 
 	if (comp == &switch_mode) {
-		scd.highlight_schedule(v.i == 1);
 		if (v.i == 1) {
 			if(edit_allowed  &&  !cnv->in_depot()) {
 				// if not in depot:
@@ -557,12 +557,12 @@ bool convoi_info_t::action_triggered( gui_action_creator_t *comp, value_t v)
 				cnv->call_convoi_tool('s', "1");
 				scd.init(cnv->get_schedule(), cnv->get_owner(), cnv, cnv->get_line());
 				reset_min_windowsize();
-
 			}
 		}
 		else if(cnv->get_state()==convoi_t::EDIT_SCHEDULE  ||  cnv->get_state()==convoi_t::INITIAL) {
 			apply_schedule();
 		}
+		scd.highlight_schedule(v.i == 1);
 	}
 
 	// some actions only allowed, when I am the player
@@ -670,12 +670,14 @@ bool convoi_info_t::infowin_event(const event_t *ev)
 			apply_schedule();
 		}
 		scd.highlight_schedule(false);
+		minimap_t::get_instance()->set_selected_cnv(convoihandle_t());
 	}
 
 	if(  ev->ev_class == INFOWIN  &&  ev->ev_code == WIN_TOP  ) {
 		if(  switch_mode.get_aktives_tab() == &container_schedule  &&  !cnv->in_depot()  ) {
 			cnv->call_convoi_tool( 's', "1" );
 			scd.highlight_schedule( true );
+			minimap_t::get_instance()->set_selected_cnv(cnv);
 		}
 	}
 

@@ -117,9 +117,9 @@ enum magic_numbers {
 	magic_script_error         = magic_toolbar              + 0x100,
 	magic_haltlist_filter,
 	magic_depot, // only used to load/save
-	magic_halt_list_t,
-	magic_depotlist   = magic_halt_list_t + MAX_PLAYER_COUNT,
+	magic_depotlist   = magic_depot + MAX_PLAYER_COUNT,
 	magic_vehiclelist = magic_depotlist   + MAX_PLAYER_COUNT,
+	magic_pakinstall,
 	magic_max
 };
 
@@ -136,6 +136,9 @@ void win_clamp_xywh_position(scr_coord_val &x, scr_coord_val &y, scr_size wh, bo
 
 int create_win(gui_frame_t*, wintype, ptrdiff_t magic);
 int create_win(scr_coord_val x, scr_coord_val y, gui_frame_t*, wintype, ptrdiff_t magic, bool move_to_show_full=false);
+
+// call to avoid the main menu getting mouse events while dragging
+void catch_dragging();
 
 bool check_pos_win(event_t*);
 
@@ -217,5 +220,8 @@ void win_set_tooltip(scr_coord_val xpos, scr_coord_val ypos, const char *text, c
  * *MUST* be explicitly unset!
  */
 void win_set_static_tooltip(const char *text);
+
+// shows a modal dialoge (blocks other interaction)
+void modal_dialogue(gui_frame_t* gui, ptrdiff_t magic, karte_t* welt, bool (*quit)());
 
 #endif

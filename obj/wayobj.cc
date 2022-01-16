@@ -46,16 +46,26 @@ const way_obj_desc_t *wayobj_t::default_oberleitung=NULL;
 stringhashtable_tpl<const way_obj_desc_t *> wayobj_t::table;
 
 
-wayobj_t::wayobj_t(loadsave_t* const file) : obj_no_info_t()
+wayobj_t::wayobj_t(loadsave_t* const file) :
+	obj_no_info_t(),
+	desc(NULL),
+	diagonal(false),
+	hang(slope_t::flat),
+	nw(false),
+	dir(dir_unknown)
 {
 	rdwr(file);
 }
 
 
-wayobj_t::wayobj_t(koord3d const pos, player_t* const owner, ribi_t::ribi const d, way_obj_desc_t const* const b) : obj_no_info_t(pos)
+wayobj_t::wayobj_t(koord3d const pos, player_t* const owner, ribi_t::ribi const d, way_obj_desc_t const* const b) :
+	obj_no_info_t(pos),
+	desc(b),
+	diagonal(false),
+	hang(slope_t::flat),
+	nw(false),
+	dir(d)
 {
-	desc = b;
-	dir = d;
 	set_owner(owner);
 }
 
@@ -177,7 +187,7 @@ void wayobj_t::cleanup(player_t *player)
 // players can remove public owned wayobjs
 const char *wayobj_t::is_deletable(const player_t *player)
 {
-	if(  get_player_nr()==welt->get_public_player()->get_player_nr()  ) {
+	if(  get_owner_nr()==PUBLIC_PLAYER_NR  ) {
 		return NULL;
 	}
 	return obj_t::is_deletable(player);

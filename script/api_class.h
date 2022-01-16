@@ -11,6 +11,7 @@
 
 #include "../squirrel/squirrel.h"
 #include "../squirrel/sq_extensions.h"  // sq_call_restricted
+#include "../tpl/stringhashtable_tpl.h"
 
 #include <string>
 
@@ -90,10 +91,7 @@ namespace script_api {
 #define call_constructor() \
 	bool ok = SQ_SUCCEEDED(sq_call_restricted(vm, nparam, true, false)); \
 	sq_remove(vm, ok ? -2 : -1); /* remove closure */ \
-	if (!ok) { \
-		return sq_raise_error(vm, "Call to constructor of %s failed", classname); \
-	} \
-	return 1;
+	return ok ? 1 : -1;
 
 	/**
 	 * Function to create & push instances of squirrel classes.
@@ -159,6 +157,22 @@ namespace script_api {
 	}
 
 	/**
+	 * Create instance, set userpointer.
+	 * Does NOT call constructor.
+	 */
+	template<class C>
+	inline SQInteger push_instance_up(HSQUIRRELVM vm, const C* ptr)
+	{
+		if (!SQ_SUCCEEDED(push_class(vm, param<const C*>::squirrel_type()) )) {
+			return -1;
+		}
+		sq_createinstance(vm, -1);
+		sq_setinstanceup(vm, -1, (void*)const_cast<C*>(ptr));
+		sq_remove(vm, -2); // remove class
+		return 1;
+	}
+
+	/**
 	 * Implementation of quickstone_tpl specialization
 	 */
 	template<class T> struct param< quickstone_tpl<T> > {
@@ -197,6 +211,32 @@ namespace script_api {
 		static const char* typemask()
 		{
 			return param<T*>::typemask();
+		}
+	};
+
+	/**
+	 * Implementation of stringhashtable_tpl specialization
+	 */
+	template<class T> struct param< stringhashtable_tpl<T> > {
+		/**
+		 * Creates table, uses string-keys as table keys.
+		 */
+		static SQInteger push(HSQUIRRELVM vm, stringhashtable_tpl<T> const& v)
+		{
+			sq_newtable(vm);
+
+			FORT(const stringhashtable_tpl<T>, const&i, v) {
+				create_slot<T>(vm, i.key, i.value);
+			}
+			return 1;
+		}
+		/// squirrel_type corresponding to the c++ type/class
+		static const char* squirrel_type()
+		{
+			static cbuffer_t buf;
+			buf.clear();
+			buf.printf("table<%s>", param<T>::squirrel_type() );
+			return buf;
 		}
 	};
 

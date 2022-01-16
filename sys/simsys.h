@@ -8,7 +8,6 @@
 
 
 #include "../simtypes.h"
-#include "../display/scr_coord.h"
 
 #ifndef NETTOOL
 #include <zlib.h>
@@ -55,15 +54,18 @@ struct sys_event_t
 		unsigned long code;
 		void *ptr;
 	};
-	int mx;                  /* es sind negative Koodinaten mgl */
-	int my;
-	int mb;
+	sint32 mx;                  /* es sind negative Koodinaten mgl */
+	sint32 my;
+	uint16 mb;
 
 	/// new window size for SYSTEM_RESIZE
-	scr_size new_window_size;
+	uint16 new_window_size_w;
+	uint16 new_window_size_h;
 
-	unsigned int key_mod; /* key mod, like ALT, STRG, SHIFT */
+	unsigned int key_mod; /* key mod, like ALT, CTRL, SHIFT */
 };
+
+enum { WINDOWED, FULLSCREEN, BORDERLESS };
 
 extern sys_event_t sys_event;
 
@@ -82,7 +84,7 @@ struct resolution
 };
 resolution dr_query_screen_resolution();
 
-int dr_os_open(int w, int h, bool fullscreen);
+int dr_os_open(int w, int h, sint16 fullscreen);
 void dr_os_close();
 
 // returns the locale; NULL if unknown
@@ -163,7 +165,6 @@ int get_mouse_y();
 void ex_ord_update_mx_my();
 
 void GetEvents();
-void GetEventsNoWait();
 
 uint8 dr_get_max_threads();
 
@@ -212,6 +213,30 @@ void dr_stop_textinput();
  * Inform the IME of a ideal place to open its popup.
  */
 void dr_notify_input_pos(int x, int y);
+
+///  returns current two byte languange ID
+const char* dr_get_locale();
+
+/// true, if there is a hardware fullcreen mode
+bool dr_has_fullscreen();
+
+/**
+ * @return
+ *  0: if windowed
+ *  1: if fullscreen
+ *  2: if borderless fullscreen
+ */
+sint16 dr_get_fullscreen();
+
+/**
+ * Toggle between borderless and windowed mode
+ * @return the fullscreen state after the toggle
+ */
+sint16 dr_toggle_borderless();
+
+/* temparily minimizes window and restore it */
+sint16 dr_suspend_fullscreen();
+void dr_restore_fullscreen(sint16 old_fullscreen);
 
 int sysmain(int argc, char** argv);
 

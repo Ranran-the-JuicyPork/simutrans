@@ -27,7 +27,7 @@
 #if USE_ZSTD
 #include "../io/rdwr/zstd_file_rdwr_stream.h"
 #endif
-
+#include "../io/rdwr/compare_file_rd_stream.h"
 
 #define INVALID_RDWR_ID (-1)
 
@@ -35,6 +35,9 @@
 
 // buffer size for read/write - bzip2 gains up to 8M for non-threaded, 1M for threaded. binary, zipped ok with 256K or smaller.
 #define LS_BUF_SIZE (1 << 20) // 1 MiB
+
+#define LS_MAX_STRING_LEN  (0x7FFF)
+#define LS_STRING_BUF_SIZE (0x8000) // includes the trailing 0
 
 #ifdef MULTI_THREAD
 #include "../utils/simthread.h"
@@ -76,7 +79,7 @@ static loadsave_param_t ls;
  * repeat                                                            (error handling)
  *                                                           if readdata_flag < 0
  *                                                         <------ end thread
- *                                                           if error occured during previous fill_buffer
+ *                                                           if error occurred during previous fill_buffer
  *                                                                 readdata_flag = -1
  *                                          (join threads) <------ end thread
  *                                                           repeat
@@ -102,7 +105,7 @@ void *load_thread( void *ptr )
 			break;
 		}
 		if (bytes_read == 0) {
-			// nothing read into buffer, or error occured
+			// nothing read into buffer, or error occurred
 			// flag error to main thread
 			readdata_flag = -1;
 			pthread_mutex_unlock(&readdata_mutex);
@@ -126,8 +129,7 @@ void loading_trigger_fill_buffer()
 	if (readdata_flag < 0) {
 		pthread_mutex_unlock(&readdata_mutex);
 		// reading thread exited due to error
-		dbg->fatal("loadsave_t::read","savegame corrupt, not enough data");
-		return;
+		dbg->fatal("loadsave_t::read", "savegame corrupt, not enough data");
 	}
 	readdata_flag = 1; // more data please
 
@@ -194,6 +196,35 @@ loadsave_t::mode_t loadsave_t::save_mode = bzip2;      // default to use for sav
 loadsave_t::mode_t loadsave_t::autosave_mode = zipped; // default to use for autosaving
 int loadsave_t::save_level = 6;
 int loadsave_t::autosave_level = 1;
+
+
+void NORETURN loadsave_t::fatal(const char* who, const char* format, ...)
+{
+	va_list argptr;
+	va_start(argptr, format);
+
+	static char formatbuffer[512];
+	const char* fn = filename.c_str();
+	sprintf(formatbuffer,
+		"FATAL ERROR during reading of \"%s\"\n"
+		"The file has been renamed to \"%s-error\"\n\n"
+		"%s: %s\n"
+		"\n"
+		"Aborting program execution ...\n"
+		"Please try to restart Simutrans again!\n",
+		fn, fn,
+		who, format);
+
+	static char buffer[8192];
+	vsprintf(buffer, formatbuffer, argptr);
+	va_end(argptr);
+
+	close();
+	std::string fn_new = filename + "-error";
+	dr_remove(fn_new.c_str());
+	dr_rename(fn, fn_new.c_str());
+	dbg->custom_fatal(buffer);
+}
 
 
 loadsave_t::loadsave_t() :
@@ -313,7 +344,7 @@ loadsave_t::file_status_t loadsave_t::rd_open(const char *filename_utf8)
 #if USE_ZSTD
 		stream = new zstd_file_rdwr_stream_t(filename_utf8, false, 0); break;
 #else
-		dbg->error("loadsave_t::rd_open", "Unsupported save file compression 'zstd'"); break;
+		dbg->warning("loadsave_t::rd_open", "Cannot read from '%s': Unsupported save file compression 'zstd'", filename_utf8);
 		return FILE_STATUS_ERR_UNSUPPORTED_COMPRESSION;
 #endif
 
@@ -361,6 +392,8 @@ loadsave_t::file_status_t loadsave_t::rd_open(const char *filename_utf8)
 		stream->read(buf, sz);
 		header_size -= sz;
 	}
+
+	filename = filename_utf8;
 
 	return FILE_STATUS_OK;
 }
@@ -434,7 +467,7 @@ loadsave_t::file_status_t loadsave_t::wr_open( const char *filename_utf8, mode_t
 		char str[4096];
 		int n = sprintf( str, "<?xml version=\"1.0\"?>\n<Simutrans version=\"%s\" pak=\"%s\">\n", savegame_version, finfo.pak_extension );
 		write( str, n );
-		ident = 1;
+		indent = 1;
 	}
 
 	return FILE_STATUS_OK;
@@ -582,6 +615,15 @@ void loadsave_t::flush_buffer(int buf_num)
 }
 
 
+void loadsave_t::write_indent()
+{
+	static const int max_indent = 64;
+	static const char spaces[max_indent] = "                                                               ";
+
+	write(spaces, min(indent, max_indent) );
+}
+
+
 size_t loadsave_t::read(void *buf, size_t len)
 {
 	if (!buffered) {
@@ -590,7 +632,6 @@ size_t loadsave_t::read(void *buf, size_t len)
 
 	if(  len>=LS_BUF_SIZE*2  ) {
 		dbg->fatal("loadsave_t::read()","Request for %d too long", len);
-		return 0;
 	}
 	if(  buff[curr_buff].pos+len<=buff[curr_buff].len  ) {
 		// room in the buffer, copy it all
@@ -621,7 +662,6 @@ size_t loadsave_t::read(void *buf, size_t len)
 		// check if enough read
 		if(  len-i>buff[curr_buff].len  ) {
 			dbg->fatal("loadsave_t::read","savegame corrupt, not enough data");
-			return 0;
 		}
 
 		// copy the rest
@@ -819,7 +859,7 @@ void loadsave_t::rdwr_bool(bool &i)
 	else {
 		// bool xml
 		if(is_saving()) {
-			write( "                                                                ", min(64,ident) );
+			write_indent();
 			if(  i  ) {
 				write( "<bool>true</bool>\n", sizeof("<bool>true</bool>\n")-1 );
 			}
@@ -835,7 +875,7 @@ void loadsave_t::rdwr_bool(bool &i)
 			read( buffer, 5 );
 			buffer[5] = 0;
 			if(  strcmp("bool>",buffer)!=0  ) {
-				dbg->fatal( "loadsave_t::rdwr_bool()","expected \"<bool>\", got \"<%s\"", buffer );
+				fatal( "loadsave_t::rdwr_bool()","expected \"<bool>\", got \"<%s\"", buffer );
 			}
 			read( buffer, 4 );
 			buffer[4] = 0;
@@ -844,7 +884,7 @@ void loadsave_t::rdwr_bool(bool &i)
 			read( buffer, 6 );
 			buffer[6] = 0;
 			if(  strcmp("/bool>",buffer)!=0  ) {
-				dbg->fatal( "loadsave_t::rdwr_bool()","expected \"</bool>\", got \"<%s\"", buffer );
+				fatal( "loadsave_t::rdwr_bool()","expected \"</bool>\", got \"<%s\"", buffer );
 			}
 		}
 	}
@@ -855,7 +895,7 @@ void loadsave_t::rdwr_xml_number(sint64 &s, const char *typ)
 {
 	if(is_saving()) {
 		static char nr[256];
-		size_t len = sprintf( nr, "%*s<%s>%.0f</%s>\n", ident, "", typ, (double)s, typ );
+		size_t len = sprintf( nr, "%*s<%s>%.0f</%s>\n", indent, "", typ, (double)s, typ );
 		write( nr, len );
 	}
 	else {
@@ -869,7 +909,7 @@ void loadsave_t::rdwr_xml_number(sint64 &s, const char *typ)
 				break;
 			}
 			if( ch < 0 ) {
-				dbg->fatal( "loadsave_t::rdwr_xml_number()", "Reached end of file while trying to read <%s>", typ );
+				fatal( "loadsave_t::rdwr_xml_number()", "Reached end of file while trying to read <%s>", typ );
 			}
 		}
 
@@ -878,7 +918,7 @@ void loadsave_t::rdwr_xml_number(sint64 &s, const char *typ)
 		read( buffer, len );
 		buffer[len] = 0;
 		if(  strcmp(typ,buffer)!=0  ) {
-			dbg->fatal( "loadsave_t::rdwr_xml_number()","expected \"<%s>\", got \"<%s>\"", typ, buffer );
+			fatal( "loadsave_t::rdwr_xml_number()","expected \"<%s>\", got \"<%s>\"", typ, buffer );
 		}
 		while(  lsgetc()!='>'  )  ;
 		// read number;
@@ -909,7 +949,7 @@ void loadsave_t::rdwr_xml_number(sint64 &s, const char *typ)
 					break;
 				}
 				else {
-					dbg->fatal( "loadsave_t::rdwr_xml_number()", "type %s, found %c in number!", typ, c );
+					fatal( "loadsave_t::rdwr_xml_number()", "type %s, found %c in number!", typ, c );
 				}
 			}
 		}
@@ -918,12 +958,12 @@ void loadsave_t::rdwr_xml_number(sint64 &s, const char *typ)
 		}
 
 		if(  lsgetc()!='/'  ) {
-			dbg->fatal( "loadsave_t::rdwr_xml_number()", "missing '/' (not closing tag)" );
+			fatal( "loadsave_t::rdwr_xml_number()", "missing '/' (not closing tag)" );
 		}
 		read( buffer, len );
 		buffer[6] = 0;
 		if(  strcmp(typ,buffer)!=0  ) {
-			dbg->fatal( "loadsave_t::rdwr_xml_number()","expected \"</%s>\", got \"</%s>\"", typ, buffer );
+			fatal( "loadsave_t::rdwr_xml_number()","expected \"</%s>\", got \"</%s>\"", typ, buffer );
 		}
 		while(  lsgetc()!='>'  )  ;
 	}
@@ -936,7 +976,7 @@ void loadsave_t::rdwr_str(const char *&s)
 	if(!is_xml()) {
 		sint16 size;
 		if(is_saving()) {
-			size = s ? (sint16)min(32767,strlen(s)) : 0;
+			size = s ? (sint16)min(LS_MAX_STRING_LEN,strlen(s)) : 0;
 #ifdef SIM_BIG_ENDIAN
 			{
 				uint16 ii = endian(size);
@@ -974,7 +1014,7 @@ void loadsave_t::rdwr_str(const char *&s)
 	else {
 		// use CDATA tag: <![CDATA[%s]]>
 		if(is_saving()) {
-			write( "                                                                ", min(64,ident) );
+			write_indent();
 			write( "<![CDATA[", 9 );
 			if(s) {
 				write( s, strlen(s) );
@@ -982,8 +1022,8 @@ void loadsave_t::rdwr_str(const char *&s)
 			write( "]]>\n", 4 );
 		}
 		else {
-			char buffer[4096];
-			rdwr_str( buffer, 4096 );
+			char buffer[LS_STRING_BUF_SIZE];
+			rdwr_str( buffer, LS_STRING_BUF_SIZE );
 			if(s) {
 				free(const_cast<char *>(s));
 			}
@@ -999,7 +1039,7 @@ void loadsave_t::rdwr_str( char* result_buffer, size_t const size)
 	if(!is_xml()) {
 		uint16 len;
 		if(is_saving()) {
-			len = (uint16)min(32767,strlen(result_buffer));
+			len = (uint16)min(LS_MAX_STRING_LEN,strlen(result_buffer));
 #ifdef SIM_BIG_ENDIAN
 			{
 				sint16 ii = endian(len);
@@ -1014,7 +1054,7 @@ void loadsave_t::rdwr_str( char* result_buffer, size_t const size)
 			read(&len, sizeof(uint16));
 			len = endian(len);
 			if(  len >= size) {
-				dbg->fatal( "loadsave_t::rdwr_str()","string longer (%i) than allowed size (%i)", len, size );
+				fatal( "loadsave_t::rdwr_str()","string longer (%i) than allowed size (%i)", len, size );
 			}
 			read(result_buffer, len);
 			result_buffer[len] = '\0';
@@ -1024,7 +1064,7 @@ void loadsave_t::rdwr_str( char* result_buffer, size_t const size)
 		// use CDATA tag: <![CDATA[%s]]>
 		char *s = result_buffer;
 		if(is_saving()) {
-			write( "                                                                ", min(64,ident) );
+			write_indent();
 			write( "<![CDATA[", 9 );
 			if(s) {
 				write( s, strlen(s) );
@@ -1041,7 +1081,7 @@ void loadsave_t::rdwr_str( char* result_buffer, size_t const size)
 			if (!strstart(buffer, "string>")) {
 				if (!strstart(buffer, "![CDATA") || lsgetc() != '[') {
 					buffer[7] = 0;
-					dbg->fatal( "loadsave_t::rdwr_str()","expected str \"<![CDATA[\", got \"%s\"", buffer );
+					fatal( "loadsave_t::rdwr_str()","expected str \"<![CDATA[\", got \"%s\"", buffer );
 				}
 				string = false;
 			}
@@ -1069,7 +1109,7 @@ void loadsave_t::rdwr_str( char* result_buffer, size_t const size)
 				}
 			}
 			else {
-				char temp[32767];
+				static char temp[LS_STRING_BUF_SIZE + 3];
 				char *s = temp;
 				for(  size_t i=0;  i<size+3;  i++  ) {
 					*s++ = lsgetc();
@@ -1080,7 +1120,7 @@ void loadsave_t::rdwr_str( char* result_buffer, size_t const size)
 					}
 				}
 				*s = 0;
-				dbg->fatal( "loadsave_t::rdwr_str()","string too long (exceeded %i characters)", size );
+				fatal( "loadsave_t::rdwr_str()","string too long (exceeded %i characters)", size );
 			}
 		}
 	}
@@ -1111,11 +1151,11 @@ void loadsave_t::start_tag(const char *tag)
 {
 	if(  is_xml()  ) {
 		if(is_saving()) {
-			write( "                                                                ", min(64,ident) );
+			write_indent();
 			write( "<", 1 );
 			write( tag, strlen(tag) );
 			write( ">\n", 2 );
-			ident ++;
+			indent ++;
 		}
 		else {
 			char buf[256];
@@ -1123,7 +1163,7 @@ void loadsave_t::start_tag(const char *tag)
 			while(  lsgetc()!='<'  ) { /* nothing */ }
 			read( buf, strlen(tag) );
 			if(  !strstart(buf, tag)  ) {
-				dbg->fatal( "loadsave_t::start_tag()","expected \"%s\", got \"%s\"", tag, buf );
+				fatal( "loadsave_t::start_tag()","expected \"%s\", got \"%s\"", tag, buf );
 			}
 			while(  lsgetc()!='>'  )  ;
 		}
@@ -1135,8 +1175,8 @@ void loadsave_t::end_tag(const char *tag)
 {
 	if(  is_xml()  ) {
 		if(is_saving()) {
-			ident --;
-			write( "                                                                ", min(64,ident) );
+			indent --;
+			write_indent();
 			write( "</", 2 );
 			write( tag, strlen(tag) );
 			write( ">\n", 2 );
@@ -1220,7 +1260,7 @@ void loadsave_t::rd_obj_id(char *id_buf, int size)
 			read( buf, 6 );
 			buf[5] = 0;
 			if (!strstart(buf, "<id=\"")) {
-				dbg->fatal( "loadsave_t::rd_obj_id()","expected id str \"<id=\"\", got \"%s\"", buf );
+				fatal( "loadsave_t::rd_obj_id()","expected id str \"<id=\"\", got \"%s\"", buf );
 			}
 			// now parse input
 			for(  int i=0;  i<size;  i++  ) {
@@ -1235,7 +1275,7 @@ void loadsave_t::rd_obj_id(char *id_buf, int size)
 			*id_buf = 0;
 			read( buf, 2 );
 			if (!strstart(buf, "/>")) {
-				dbg->fatal( "loadsave_t::rd_obj_id()","id tag not properly closed!" );
+				fatal( "loadsave_t::rd_obj_id()","id tag not properly closed!" );
 			}
 		}
 	}
@@ -1319,3 +1359,30 @@ uint32 loadsave_t::int_version(const char *version_text, char *pak_extension_str
 
 	return version;
 }
+
+
+stream_loadsave_t::stream_loadsave_t(rdwr_stream_t *stream)
+{
+	this->stream = stream;
+	finfo.version = int_version(VERSION_NUMBER, NULL);
+}
+
+
+compare_loadsave_t::compare_loadsave_t(loadsave_t *file1, loadsave_t *file2)
+{
+	stream = new compare_file_rd_stream_t(file1->stream, file2->stream);
+	finfo.version = int_version(VERSION_NUMBER, NULL);
+	set_buffered(false);
+	file1->set_buffered(false);
+	file2->set_buffered(false);
+}
+
+
+compare_loadsave_t::~compare_loadsave_t()
+{
+	delete stream;
+	stream = NULL;
+}
+
+
+

@@ -454,7 +454,7 @@ void factory_builder_t::distribute_attractions(int max_number)
 		pos = find_random_construction_site(pos.get_2d(), 20, attraction->get_size(rotation), factory_desc_t::Land, attraction, false, 0x0FFFFFFF); // so far -> land only
 		if(welt->lookup(pos)) {
 			// space found, build attraction
-			hausbauer_t::build(welt->get_public_player(), pos, rotation, attraction);
+			hausbauer_t::build(welt->get_public_player(), pos.get_2d(), rotation, attraction);
 			current_number ++;
 			retrys = max_number*4;
 		}
@@ -771,18 +771,17 @@ int factory_builder_t::build_chain_link(const fabrik_t* our_fab, const factory_d
 
 	// search if there already is one or two (cross-connect everything if possible)
 	FOR(slist_tpl<fabrik_t*>, const fab, welt->get_fab_list()) {
+
 		// Try to find matching factories for this consumption, but don't find more than two times number of factories requested.
-		if ((lcount != 0 || consumption <= 0) && lcount < lfound + 1) break;
+		if (  (lcount != 0  ||  consumption <= 0)  &&  lcount < lfound + 1  )
+			break;
 
 		// connect to an existing one if this is a producer
-		if(fab->vorrat_an(ware) > -1) {
+		if(  fab->vorrat_an(ware) > -1  ) {
 
-			// for sources (oil fields, forests ... ) prefer those with a smaller distance
-			const unsigned distance = koord_distance(fab->get_pos(),our_fab->get_pos());
-
-			if(distance>6) {//  &&  distance < simrand(welt->get_size().x+welt->get_size().y)) {
-				// ok, this would match
-				// but can she supply enough?
+			const int distance = koord_distance(fab->get_pos(),our_fab->get_pos());
+			if(  distance > welt->get_settings().get_min_factory_spacing()  &&  distance <= DISTANCE  ) {
+				// ok, this would match but can she supply enough?
 
 				// now guess how much this factory can supply
 				const factory_desc_t* const fd = fab->get_desc();
@@ -958,7 +957,9 @@ int factory_builder_t::increase_industry_density( bool tell_me )
 {
 	int nr = 0;
 	fabrik_t *last_built_consumer = NULL;
-	const goods_desc_t *last_built_consumer_ware;
+#if MSG_LEVEL >= 3
+	const goods_desc_t *last_built_consumer_ware = NULL;
+#endif
 
 	// find last consumer
 	minivec_tpl<const goods_desc_t *>ware_needed;
@@ -1013,7 +1014,9 @@ int factory_builder_t::increase_industry_density( bool tell_me )
 			}
 
 			nr += build_chain_link( last_built_consumer, last_built_consumer->get_desc(), last_built_consumer_missing_supplier, welt->get_public_player() );
+#if MSG_LEVEL >=3
 			last_built_consumer_ware = ware_needed[ 0 ];
+#endif
 			ware_needed.remove_at( 0 );
 
 		} while(  !ware_needed.empty()  &&  last_built_consumer->get_suppliers().get_count()==last_suppliers  );

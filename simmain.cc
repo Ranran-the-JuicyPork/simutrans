@@ -9,6 +9,10 @@
 #endif
 #endif
 
+#if defined(_MSC_VER)  &&  defined(DEBUG)
+// Console window on MSVC debug builds
+#pragma comment(linker, "/SUBSYSTEM:CONSOLE")
+#endif
 
 #include <stdio.h>
 #include <string>
@@ -63,11 +67,13 @@
 
 #include "utils/simstring.h"
 #include "utils/searchfolder.h"
+#include "io/rdwr/compare_file_rd_stream.h"
 
 #include "network/network.h" // must be before any "windows.h" is included via bzlib2.h ...
 #include "dataobj/loadsave.h"
 #include "dataobj/environment.h"
 #include "dataobj/tabfile.h"
+#include "dataobj/scenario.h"
 #include "dataobj/settings.h"
 #include "dataobj/translator.h"
 #include "network/pakset_info.h"
@@ -131,7 +137,7 @@ static void show_sizes()
 // render tests ...
 static void show_times(karte_t *welt, main_view_t *view)
 {
-	intr_set(welt, view);
+	intr_set_view(view);
 	welt->set_fast_forward(true);
 	intr_disable();
 
@@ -211,130 +217,6 @@ static void show_times(karte_t *welt, main_view_t *view)
 #endif
 
 
-void modal_dialogue( gui_frame_t *gui, ptrdiff_t magic, karte_t *welt, bool (*quit)() )
-{
-	if(  display_get_width()==0  ) {
-		dbg->error( "modal_dialogue", "called without a display driver => nothing will be shown!" );
-		env_t::quit_simutrans = true;
-		// cannot handle this!
-		return;
-	}
-
-	// switch off autosave
-	sint32 old_autosave = env_t::autosave;
-	env_t::autosave = 0;
-
-	event_t ev;
-	scr_coord_val x = (display_get_width() - gui->get_windowsize().w) / 2;
-	scr_coord_val y = (display_get_height() - gui->get_windowsize().h) / 2;
-	win_clamp_xywh_position(x, y, gui->get_windowsize(), true);
-	create_win( x, y, gui, w_info, magic );
-
-	if(  welt  ) {
-		welt->set_pause( false );
-		welt->reset_interaction();
-		welt->reset_timer();
-
-		uint32 ms_pause = max( 25, 1000/env_t::fps );
-		uint32 last_step = dr_time();
-		uint step_count = 5;
-
-		while(  win_is_open(gui)  &&  !env_t::quit_simutrans  &&  !quit()  ) {
-			do {
-				DBG_DEBUG4("modal_dialogue", "calling win_poll_event");
-				win_poll_event(&ev);
-				x = ev.mx;
-				y = ev.my;
-				win_clamp_xywh_position(x, y, scr_size(1, 1), false );
-				ev.mx = x;
-				ev.my = y;
-				x = ev.cx;
-				y = ev.cy;
-				win_clamp_xywh_position(x, y, scr_size(1, 1), false);
-				ev.cx = x;
-				ev.cy = y;
-				if(  ev.ev_class == EVENT_KEYBOARD  &&  ev.ev_code == SIM_KEY_F1  ) {
-					if(  gui_frame_t *win = win_get_top()  ) {
-						if(  const char *helpfile = win->get_help_filename()  ) {
-							help_frame_t::open_help_on( helpfile );
-							continue;
-						}
-					}
-				}
-				DBG_DEBUG4("modal_dialogue", "calling check_pos_win");
-				check_pos_win(&ev);
-				if(  ev.ev_class == EVENT_SYSTEM  &&  ev.ev_code == SYSTEM_QUIT  ) {
-					env_t::quit_simutrans = true;
-					break;
-				}
-				dr_sleep(5);
-			} while(  dr_time() - last_step < ms_pause );
-
-			DBG_DEBUG4("modal_dialogue", "calling welt->sync_step");
-			welt->sync_step( ms_pause, true, true );
-
-			if(  step_count--==0  ) {
-				DBG_DEBUG4("modal_dialogue", "calling welt->step");
-				intr_set_last_time(last_step); // do not call sync_step twice unless step takes too long
-				welt->step();
-				step_count = 5;
-			}
-			last_step += ms_pause;
-		}
-	}
-	else {
-		display_show_pointer(true);
-		display_show_load_pointer(0);
-		display_fillbox_wh_rgb( 0, 0, display_get_width(), display_get_height(), color_idx_to_rgb(COL_BLACK), true );
-		while(  win_is_open(gui)  &&  !env_t::quit_simutrans  &&  !quit()  ) {
-			// do not move, do not close it!
-			dr_sleep(50);
-			// check for events again after waiting
-			if (quit()) {
-				break;
-			}
-			dr_prepare_flush();
-			gui->draw(win_get_pos(gui), gui->get_windowsize());
-			dr_flush();
-
-			display_poll_event(&ev);
-			if(ev.ev_class==EVENT_SYSTEM) {
-				if (ev.ev_code==SYSTEM_RESIZE) {
-					// main window resized
-					simgraph_resize( ev.new_window_size );
-					dr_prepare_flush();
-					display_fillbox_wh_rgb( 0, 0, ev.new_window_size.w, ev.new_window_size.h, color_idx_to_rgb(COL_BLACK), true );
-					gui->draw(win_get_pos(gui), gui->get_windowsize());
-					dr_flush();
-				}
-				else if (ev.ev_code == SYSTEM_QUIT) {
-					env_t::quit_simutrans = true;
-					break;
-				}
-			}
-			else {
-				// other events
-				check_pos_win(&ev);
-			}
-		}
-		display_show_load_pointer(1);
-		dr_prepare_flush();
-		display_fillbox_wh_rgb( 0, 0, display_get_width(), display_get_height(), color_idx_to_rgb(COL_BLACK), true );
-		dr_flush();
-	}
-
-	// just trigger not another following window => wait for button release
-	if (IS_LEFTCLICK(&ev)) {
-		do {
-			display_get_event(&ev);
-		} while (!IS_LEFTRELEASE(&ev));
-	}
-
-	// restore autosave
-	env_t::autosave = old_autosave;
-}
-
-
 // some routines for the modal display
 static bool never_quit() { return false; }
 static bool no_language() { return translator::get_language()!=-1; }
@@ -352,6 +234,9 @@ static bool wait_for_key()
 			return true;
 		}
 	}
+	if(  IS_LEFTRELEASE(&ev)  ) {
+		return true;
+	}
 	event_t *nev = new event_t();
 	*nev = ev;
 	queue_event(nev);
@@ -365,7 +250,8 @@ static bool wait_for_key()
  */
 static void install_objfilename()
 {
-#ifdef _WIN32
+	DBG_DEBUG("", "env_t::reload_and_save_on_quit=%d", env_t::reload_and_save_on_quit);
+#if !defined(USE_OWN_PAKINSTALL)  &&  defined(_WIN32)
 	dr_download_pakset( env_t::data_dir, env_t::data_dir == env_t::user_dir );  // windows
 #else
 	pakinstaller_t* sel = new pakinstaller_t();
@@ -427,7 +313,7 @@ static void ask_language()
  * This function will be set in the main function as the handler the runtime environment will
  * call in the case it lacks memory for new()
  */
-static void sim_new_handler()
+NORETURN static void sim_new_handler()
 {
 	dbg->fatal("sim_new_handler()", "OUT OF MEMORY");
 }
@@ -477,6 +363,7 @@ void print_help()
 		"command line parameters available: \n"
 		" -addons             loads also addons (with -objects)\n"
 		" -async              asynchronous images, only for SDL\n"
+		" -borderless         emulate fullscreen as borderless window\n"
 		" -use_hw             hardware double buffering, only for SDL\n"
 		" -debug NUM          enables debugging (1..5)\n"
 		" -easyserver         set up every for server (query own IP, port forwarding)\n"
@@ -501,6 +388,7 @@ void print_help()
 		"                     a server will pause if there are no clients\n"
 		" -res N              starts in specified resolution: \n"
 		"                      1=640x480, 2=800x600, 3=1024x768, 4=1280x1024\n"
+		" -scenario NAME      Load scenario NAME\n"
 		" -screensize WxH     set screensize to width W and height H\n"
 		" -server [PORT]      starts program as server (for network game)\n"
 		"                     without port specified uses 13353\n"
@@ -509,6 +397,8 @@ void print_help()
 		" -server_dns FQDN/IP FQDN or IP address of server for announcements\n"
 		" -server_name NAME   Name of server for announcements\n"
 		" -server_admin_pw PW password for server administration\n"
+		" -heavy NUM          enables heavy-mode debugging for network games. VERY SLOW!\n"
+		" -set_workdir WD     Use WD as directory containing all data.\n"
 		" -singleuser         Save everything in data directory (portable version)\n"
 #ifdef DEBUG
 		" -sizes              Show current size of some structures\n"
@@ -531,15 +421,18 @@ void print_help()
 
 void setup_logging(const args_t &args)
 {
+	const char *version = "Simutrans version " VERSION_NUMBER " from " VERSION_DATE
 #ifdef REVISION
-	const char *version = "Simutrans version " VERSION_NUMBER " from " VERSION_DATE " r" QUOTEME(REVISION) "\n";
-#else
-	const char *version = "Simutrans version " VERSION_NUMBER " from " VERSION_DATE "\n";
+		" r" QUOTEME(REVISION)
 #endif
+#ifdef GIT_HASH
+		" hash " QUOTEME(GIT_HASH)
+#endif
+		"\n";
 
 #ifdef SYSLOG
-	bool cli_syslog_enabled = (gimme_arg( argc, argv, "-syslog", 0 ) != NULL);
-	const char* cli_syslog_tag = gimme_arg( argc, argv, "-tag", 1 );
+	bool cli_syslog_enabled = args.has_arg("-syslog");
+	const char* cli_syslog_tag = args.gimme_arg("-tag", 1);
 #else
 	bool cli_syslog_enabled = false;
 	const char* cli_syslog_tag = NULL;
@@ -607,9 +500,25 @@ int simu_main(int argc, char** argv)
 #ifdef __BEOS__
 	if (1) // since BeOS only supports relative paths ...
 #else
-	// If use_workdir is given, use cwd as data dir, otherwise use the directory
-	// where the executable is located
-	if (args.has_arg("-use_workdir"))
+	// 3 possibilities:
+	//  * -set_workdir : Use the specified directory as data dir
+	//  * -use_workdir : Use the current directory as data dir
+	//  * otherwise    : Use the directory where the executable is located
+	if( const char *p = args.gimme_arg( "-set_workdir", 1 ) ) {
+		if(  dr_chdir( p )  ) {
+			cbuffer_t errmsg;
+			errmsg.printf("Path not found for -set_workdir \"%s\"",  p);
+			dr_fatal_notify(errmsg);
+			return EXIT_FAILURE;
+		}
+		else {
+			tstrncpy( env_t::data_dir, p, lengthof( env_t::data_dir ) );
+			if( env_t::data_dir[strlen( p )-1]!=PATH_SEPARATOR[0] ) {
+				strcat( env_t::data_dir, PATH_SEPARATOR );
+			}
+		}
+	}
+	else if (args.has_arg("-use_workdir"))
 #endif
 	{
 		// save the current directories
@@ -619,16 +528,6 @@ int simu_main(int argc, char** argv)
 	else {
 		strcpy( env_t::data_dir, argv[0] );
 		*(strrchr( env_t::data_dir, PATH_SEPARATOR[0] )+1) = 0;
-
-#ifdef __APPLE__
-		// change working directory from binary dir to bundle dir
-		if(  !strcmp((env_t::data_dir + (strlen(env_t::data_dir) - 20 )), ".app/Contents/MacOS/")  ) {
-			env_t::data_dir[strlen(env_t::data_dir) - 20] = 0;
-			while(  env_t::data_dir[strlen(env_t::data_dir) - 1] != '/'  ) {
-				env_t::data_dir[strlen(env_t::data_dir) - 1] = 0;
-			}
-		}
-#endif
 
 #ifdef __APPLE__
 		// Detect if the binary is started inside an application bundle
@@ -691,7 +590,6 @@ int simu_main(int argc, char** argv)
 			if(  settings_file.get_version_int()>loadsave_t::int_version(SAVEGAME_VER_NR, NULL )  ) {
 				// too new => remove it
 				settings_file.close();
-				dr_remove("settings.xml");
 			}
 			else {
 				found_settings = true;
@@ -708,7 +606,7 @@ int simu_main(int argc, char** argv)
 
 	sint16 disp_width = 0;
 	sint16 disp_height = 0;
-	bool fullscreen = false;
+	sint16 fullscreen = WINDOWED;
 
 	// continue parsing
 	dr_chdir( env_t::data_dir );
@@ -743,6 +641,11 @@ int simu_main(int argc, char** argv)
 	if(  args.has_arg("-freeplay")  ) {
 		env_t::default_settings.set_freeplay( true );
 	}
+
+#ifdef __ANDROID__
+	// always save and reload on Android
+	env_t::reload_and_save_on_quit = true;
+#endif
 
 	// now set the desired objectfilename (override all previous settings)
 	if(  const char *fn = args.gimme_arg("-objects", 1)  ) {
@@ -784,7 +687,7 @@ int simu_main(int argc, char** argv)
 		}
 		// will fail fatal on the opening routine ...
 		dbg->message( "simu_main()", "Server started on port %i", env_t::server_port );
-		env_t::networkmode = network_init_server( env_t::server_port );
+		env_t::networkmode = network_init_server( env_t::server_port, env_t::listen );
 		// query IP and try to open ports on router
 		char IP[256], altIP[256];
 		altIP[0] = 0;
@@ -811,12 +714,18 @@ int simu_main(int argc, char** argv)
 			}
 			// will fail fatal on the opening routine ...
 			dbg->message( "simu_main()", "Server started on port %i", env_t::server_port );
-			env_t::networkmode = network_init_server( env_t::server_port );
+			env_t::networkmode = network_init_server( env_t::server_port, env_t::listen );
 		}
 		else {
 			// no announce for clients ...
 			env_t::server_announce = 0;
 		}
+	}
+	// enabling heavy-mode for debugging network games
+	env_t::network_heavy_mode = 0;
+	if(  args.has_arg("-heavy")  ) {
+		int heavy = atoi(args.gimme_arg("-heavy", 1));
+		env_t::network_heavy_mode = clamp(heavy, 0, 2);
 	}
 
 	DBG_MESSAGE("simu_main()", "Version:    " VERSION_NUMBER "  Date: " VERSION_DATE);
@@ -866,7 +775,15 @@ int simu_main(int argc, char** argv)
 		}
 	}
 
-	fullscreen |= args.has_arg("-fullscreen");
+	if ( !fullscreen ) {
+		fullscreen = args.has_arg("-fullscreen") ? FULLSCREEN : WINDOWED;
+	}
+	if ( !fullscreen ) {
+		fullscreen = args.has_arg("-borderless") ? BORDERLESS : WINDOWED;
+	}
+	if ( !fullscreen ) {
+		fullscreen = env_t::fullscreen;
+	}
 
 	if(args.has_arg("-screensize")) {
 		const char* res_str = args.gimme_arg("-screensize", 1);
@@ -911,13 +828,12 @@ int simu_main(int argc, char** argv)
 		}
 	}
 
-	DBG_MESSAGE("simu_main()", "simgraph_init disp_width=%d, disp_height=%d, fullscreen=%d", disp_width, disp_height, (int)fullscreen);
-	if (!simgraph_init(scr_size(disp_width, disp_height), fullscreen != 0)) {
+	DBG_MESSAGE("simu_main()", "simgraph_init disp_width=%d, disp_height=%d, fullscreen=%d", disp_width, disp_height, fullscreen);
+	if (!simgraph_init(scr_size(disp_width, disp_height), fullscreen)) {
 		dbg->error("simu_main()", "Failed to initialize graphics system.");
 		return EXIT_FAILURE;
 	}
 	DBG_MESSAGE("simu_main()", ".. results in disp_width=%d, disp_height=%d", display_get_width(), display_get_height());
-
 	// now that the graphics system has already started
 	// the saved colours can be converted to the system format
 	env_t_rgb_to_system_colors();
@@ -971,10 +887,15 @@ int simu_main(int argc, char** argv)
 		}
 	}
 	// specified themes not found => try default themes
+#if COLOUR_DEPTH != 0
 	if(  !themes_ok  ) {
 		dr_chdir( env_t::data_dir );
 		dr_chdir( "themes" );
+#ifndef __ANDROID__
 		themes_ok = gui_theme_t::themes_init("themes.tab",true,false);
+#else
+		themes_ok = gui_theme_t::themes_init("theme-large.tab", true, false);
+#endif
 	}
 	if(  !themes_ok  ) {
 		dbg->fatal( "simu_main()", "No GUI themes found! Please re-install!" );
@@ -984,9 +905,8 @@ int simu_main(int argc, char** argv)
 	// The loading screen needs to be initialized
 	display_show_pointer(1);
 
-#if COLOUR_DEPTH != 0
 	// if no object files given, we ask the user
-	while (  env_t::objfilename.empty()  ) {
+	for(  int retries=0;  env_t::objfilename.empty()  &&  retries < 2;  retries++  ) {
 		ask_objfilename();
 
 		if(  env_t::quit_simutrans  ) {
@@ -1000,6 +920,7 @@ int simu_main(int argc, char** argv)
 	}
 #else
 	// headless server
+	dr_chdir( env_t::data_dir );
 	if(  env_t::objfilename.empty()  ) {
 		dr_fatal_notify(
 			"*** No pak set found ***\n"
@@ -1162,7 +1083,7 @@ int simu_main(int argc, char** argv)
 	}
 
 	// simgraph_init loads default fonts, now we need to load (if not set otherwise)
-	sprachengui_t::init_font_from_lang( strcmp(env_t::fontname.c_str(), FONT_PATH_X "prop.fnt")==0 );
+//	sprachengui_t::init_font_from_lang( strcmp(env_t::fontname.c_str(), FONT_PATH_X "prop.fnt")==0 );
 	dr_chdir(env_t::data_dir);
 
 	dbg->message("simu_main()","Reading city configuration ...");
@@ -1207,10 +1128,11 @@ int simu_main(int argc, char** argv)
 	}
 
 	pakset_info_t::calculate_checksum();
-	pakset_info_t::debug();
-
+	if(  env_t::verbose_debug >= log_t::LEVEL_DEBUG  ) {
+		pakset_info_t::debug();
+	}
 	if(  !overlaid_warning.empty()  ) {
-		overlaid_warning.append( "<p>Continue by ESC, SPACE, or BACKSPACE.<br>" );
+		overlaid_warning.append( "<p>Continue by click, ESC, SPACE, or BACKSPACE.<br>" );
 		help_frame_t *win = new help_frame_t();
 		win->set_text( overlaid_warning.c_str() );
 		modal_dialogue( win, magic_pakset_info_t, NULL, wait_for_key );
@@ -1228,8 +1150,16 @@ int simu_main(int argc, char** argv)
 
 	dbg->message("simu_main()","Reading menu configuration ...");
 	dr_chdir( env_t::data_dir );
-	tool_t::read_menu(env_t::objfilename);
+	if (!tool_t::read_menu(env_t::objfilename + "config/menuconf.tab")) {
+		// Fatal error while reading menuconf.tab, we cannot continue!
+		dbg->fatal(
+			"Could not read %s%sconfig/menuconf.tab.\n"
+			"This file is required for a valid pak set (graphics).\n"
+			"Please install and select a valid pak set.",
+			env_t::data_dir, env_t::objfilename.c_str());
+	}
 
+#if COLOUR_DEPTH != 0
 	// reread theme
 	dr_chdir( env_t::user_dir );
 	dr_chdir( "themes" );
@@ -1240,11 +1170,24 @@ int simu_main(int argc, char** argv)
 		dr_chdir( "themes" );
 		themes_ok = gui_theme_t::themes_init( env_t::default_theme, true, false );
 	}
+#endif
 	dr_chdir( env_t::data_dir );
 
-
 	if(  translator::get_language()==-1  ) {
-		ask_language();
+		// try current language
+		const char* loc = dr_get_locale();
+		if(  loc==NULL  ||  !translator::set_language( loc )  ) {
+			loc = dr_get_locale_string();
+			if(  loc==NULL  ||  !translator::set_language( loc )  ) {
+				ask_language();
+			}
+			else {
+				sprachengui_t::init_font_from_lang();
+			}
+		}
+		else {
+			sprachengui_t::init_font_from_lang();
+		}
 	}
 
 	bool new_world = true;
@@ -1276,6 +1219,27 @@ int simu_main(int argc, char** argv)
 		dbg->message("simu_main()", "Loading savegame \"%s\"", name );
 		loadgame = buf;
 		new_world = false;
+	}
+
+	// compare two savegames
+	if (!new_world  &&  strstart(loadgame.c_str(), "net:")==NULL  &&  args.has_arg("-compare")) {
+		cbuffer_t buf;
+		dr_chdir( env_t::user_dir );
+
+		const char *name = args.gimme_arg("-compare", 1);
+		buf.printf( SAVE_PATH_X "%s", searchfolder_t::complete(name, "sve").c_str() );
+		// open both files
+		loadsave_t file1, file2;
+		if (file1.rd_open(loadgame.c_str()) == loadsave_t::FILE_STATUS_OK  &&  file2.rd_open(buf) == loadsave_t::FILE_STATUS_OK) {
+			karte_t *welt = new karte_t();
+
+			compare_loadsave_t compare(&file1, &file2);
+			welt->load(&compare);
+
+			delete welt;
+			file1.close();
+			file2.close();
+		}
 	}
 
 	// recover last server game
@@ -1442,14 +1406,43 @@ int simu_main(int argc, char** argv)
 	setsimrand(dr_time(), dr_time());
 	clear_random_mode( 7 ); // allow all
 
-	if(  loadgame==""  ||  !welt->load(loadgame.c_str())  ) {
+	scenario_t *scen = NULL;
+	if(  const char *scen_name = args.gimme_arg("-scenario", 1)  ) {
+		scen = new scenario_t(welt);
+
+		intr_set_view(view);
+		win_set_world(welt);
+
+		const char *err = "";
+		if (env_t::default_settings.get_with_private_paks()) {
+			// try addon directory first
+			err = scen->init(("addons/" + env_t::objfilename + "scenario/").c_str(), scen_name, welt);
+		}
+		if (err) {
+			// no addon scenario, look in pakset
+			err = scen->init((env_t::data_dir + env_t::objfilename + "scenario/").c_str(), scen_name, welt);
+		}
+		if(  err  ) {
+			dbg->error("simu_main()", "Could not load scenario %s%s: %s", env_t::objfilename.c_str(), scen_name, err);
+			delete scen;
+			scen = NULL;
+		}
+		else {
+			new_world = false;
+		}
+	}
+
+	if(  scen == NULL && (loadgame==""  ||  !welt->load(loadgame.c_str()))  ) {
 		// create a default map
 		DBG_MESSAGE("simu_main()", "Init with default map (failing will be a pak error!)");
-		// no autosave on initial map during the first six month ...
+
+		// no autosave on initial map during the first six months
 		loadgame = "";
 		new_world = true;
+
 		sint32 old_autosave = env_t::autosave;
 		env_t::autosave = false;
+
 		settings_t sets;
 		sets.copy_city_road( env_t::default_settings );
 		sets.set_default_climates();
@@ -1460,15 +1453,19 @@ int simu_main(int argc, char** argv)
 		sets.set_tourist_attractions(1);
 		sets.set_traffic_level(7);
 		welt->init(&sets,0);
+
 		//  start in June ...
-		intr_set(welt, view);
+		intr_set_view(view);
 		win_set_world(welt);
+
 		tool_t::toolbar_tool[0]->init(welt->get_active_player());
+
 		welt->set_fast_forward(true);
 		welt->sync_step(5000,true,false);
 		welt->step_month(5);
 		welt->step();
 		welt->step();
+
 		env_t::autosave = old_autosave;
 	}
 	else {
@@ -1476,9 +1473,13 @@ int simu_main(int argc, char** argv)
 		if(  (args.has_arg("-freeplay"))  ) {
 			welt->get_settings().set_freeplay( true );
 		}
-		// just init view (world was loaded from file)
-		intr_set(welt, view);
-		win_set_world(welt);
+
+		if (scen == NULL) {
+			// just init view (world was loaded from file)
+			intr_set_view(view);
+			win_set_world(welt);
+		}
+
 		tool_t::toolbar_tool[0]->init(welt->get_active_player());
 	}
 
@@ -1534,7 +1535,7 @@ int simu_main(int argc, char** argv)
 
 	// simgraph_init loads default fonts, now we need to load
 	// the real fonts for the current language, if not set otherwise
-	sprachengui_t::init_font_from_lang( strcmp(env_t::fontname.c_str(), FONT_PATH_X "prop.fnt")==0 );
+	sprachengui_t::init_font_from_lang();
 
 	if(   !(env_t::reload_and_save_on_quit  &&  !new_world)  ) {
 		destroy_all_win(true);

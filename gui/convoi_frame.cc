@@ -72,15 +72,7 @@ public:
 
 	void sort()
 	{
-/*
-		// set visibility according to filter
-		for(  vector_tpl<gui_component_t*>::iterator iter = item_list.begin();  iter != item_list.end();  ++iter) {
-			gui_convoiinfo_t *a = dynamic_cast<gui_convoiinfo_t*>(*iter);
-
-			a->set_visible( main->passes_filter(a->get_cnv()) );
-		}
-
-*/		main_static = main;
+		main_static = main;
 		gui_scrolled_list_t::sort(0);
 	}
 
@@ -178,7 +170,7 @@ void convoi_frame_t::fill_list()
 	last_world_convois = welt->convoys().get_count();
 	current_wt = tabs.get_active_tab_waytype();
 
-	const bool all = owner->get_player_nr() == 1;
+	const bool all = owner->is_public_service();
 	scrolly->clear_elements();
 	FOR(vector_tpl<convoihandle_t>, const cnv, welt->convoys()) {
 		if(  all  ||  cnv->get_owner()==owner  ) {
@@ -194,8 +186,7 @@ void convoi_frame_t::fill_list()
 void convoi_frame_t::sort_list()
 {
 	scrolly->sort();
-	sortedby.set_text(sort_text[get_sortierung()]);
-	sorteddir.set_text( get_reverse() ? "cl_btn_sort_desc" : "cl_btn_sort_asc");
+	sortedby.set_selection(sortby);
 }
 
 
@@ -214,25 +205,30 @@ convoi_frame_t::convoi_frame_t() :
 
 	set_table_layout(1,0);
 
-	add_table(5,2);
+	add_table(4,2);
 	{
-		new_component_span<gui_label_t>("cl_txt_sort", 2);
+		new_component<gui_label_t>("Filter:");
 		name_filter_input.set_text( name_filter, lengthof(name_filter) );
-		add_component(&name_filter_input,2);
-		new_component<gui_fill_t>();
-
-		sortedby.init(button_t::roundbox, sort_text[get_sortierung()]);
-		sortedby.add_listener(this);
-		add_component(&sortedby);
-
-		sorteddir.init(button_t::roundbox, get_reverse() ? "cl_btn_sort_desc" : "cl_btn_sort_asc");
-		sorteddir.add_listener(this);
-		add_component(&sorteddir);
-
-		new_component<gui_label_t>("Filter:",ALIGN_RIGHT);
+		add_component(&name_filter_input);
 		filter_details.init(button_t::roundbox, "cl_btn_filter_settings");
 		filter_details.add_listener(this);
 		add_component(&filter_details);
+		new_component<gui_fill_t>();
+
+		new_component<gui_label_t>("cl_txt_sort");
+		sortedby.set_unsorted(); // do not sort
+		for(  size_t i=0;  i < lengthof(sort_text);  i++  ) {
+			sortedby.new_component<gui_scrolled_list_t::const_text_scrollitem_t>(translator::translate(sort_text[i]),SYSCOL_TEXT);
+		}
+		sortedby.set_selection(get_sortierung());
+		sortedby.add_listener(this);
+		add_component(&sortedby);
+
+		sorteddir.init(button_t::sortarrow_automatic, NULL);
+		sorteddir.add_listener(this);
+		sorteddir.pressed = get_reverse();
+		add_component(&sorteddir);
+
 		new_component<gui_fill_t>();
 	}
 	end_table();
@@ -303,6 +299,7 @@ bool convoi_frame_t::action_triggered( gui_action_creator_t *comp, value_t /* */
 void convoi_frame_t::draw(scr_coord pos, scr_size size)
 {
 	filter_details.pressed = win_get_magic( magic_convoi_list_filter+owner->get_player_nr() );
+	sorteddir.pressed = get_reverse();
 
 	if (last_world_convois != welt->convoys().get_count()  ||  strcmp(last_name_filter,name_filter)) {
 		strcpy( last_name_filter, name_filter );
@@ -352,12 +349,11 @@ void convoi_frame_t::rdwr( loadsave_t *file )
 			}
 			waren_filter = &waren_filter_rd;
 		}
-	}
 
-	if( file->is_loading() ) {
 		sortby = (sort_mode_t)sort_mode;
 		owner = welt->get_player( player_nr );
 		win_set_magic(this, magic_convoi_list+player_nr );
+		current_wt = tabs.get_active_tab_waytype();
 		fill_list();
 		set_windowsize( size );
 	}

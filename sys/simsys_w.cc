@@ -17,6 +17,11 @@
 #include <imm.h>
 #include <commdlg.h>
 
+#include <shellapi.h>
+#include <shlobj.h>
+
+#include <string>
+
 #ifdef __CYGWIN__
 extern int __argc;
 extern char **__argv;
@@ -53,7 +58,7 @@ extern char **__argv;
 static const LPCWSTR WINDOW_CLASS_NAME = L"Simu";
 
 static volatile HWND hwnd;
-static bool is_fullscreen = false;
+static sint16 fullscreen = WINDOWED;
 static bool is_not_top = false;
 static MSG msg;
 static RECT WindowSize = { 0, 0, 0, 0 };
@@ -143,24 +148,25 @@ static void create_window(DWORD const ex_style, DWORD const style, int const x, 
 	SetTimer( hwnd, 0, 1111, NULL ); // HACK: so windows thinks we are not dead when processing a timer every 1111 ms ...
 }
 
+static DEVMODE settings;
+
 
 // open the window
-int dr_os_open(int const w, int const h, bool fullscreen)
+int dr_os_open(int const w, int const h, sint16 fs)
 {
 	MaxSize.right = ((w*x_scale)/32+15) & 0x7FF0;
 	MaxSize.bottom = (h*y_scale)/32;
+	fullscreen = fs;
 
 #ifdef MULTI_THREAD
 	InitializeCriticalSection( &redraw_underway );
 	hFlushThread = CreateThread( NULL, 0, dr_flush_screen, 0, CREATE_SUSPENDED, NULL );
 #endif
+	MEMZERO(settings);
 
 	// fake fullscreen
 	if (fullscreen) {
 		// try to force display mode and size
-		DEVMODE settings;
-
-		MEMZERO(settings);
 		settings.dmSize = sizeof(settings);
 		settings.dmFields = DM_BITSPERPEL | DM_PELSWIDTH | DM_PELSHEIGHT;
 		settings.dmBitsPerPel = COLOUR_DEPTH;
@@ -177,12 +183,11 @@ int dr_os_open(int const w, int const h, bool fullscreen)
 		}
 		if(  ChangeDisplaySettings(&settings, CDS_TEST)!=DISP_CHANGE_SUCCESSFUL  ) {
 			ChangeDisplaySettings( NULL, 0 );
-			fullscreen = false;
+			fullscreen = WINDOWED;
 		}
 		else {
 			ChangeDisplaySettings(&settings, CDS_FULLSCREEN);
 		}
-		is_fullscreen = fullscreen;
 	}
 	if(  fullscreen  ) {
 		create_window(WS_EX_TOPMOST, WS_POPUP, 0, 0, MaxSize.right, MaxSize.bottom);
@@ -239,7 +244,7 @@ void dr_os_close()
 	AllDibData = NULL;
 	free(AllDib);
 	AllDib = NULL;
-	if(  is_fullscreen  ) {
+	if(  fullscreen == FULLSCREEN ) {
 		ChangeDisplaySettings(NULL, 0);
 	}
 }
@@ -382,6 +387,57 @@ void dr_textur(int xp, int yp, int w, int h)
 	}
 }
 
+bool dr_has_fullscreen()
+{
+	return true;
+}
+
+sint16 dr_get_fullscreen()
+{
+	return fullscreen;
+}
+
+sint16 dr_toggle_borderless()
+{
+	if (fullscreen == WINDOWED) {
+		SetWindowLongPtr(hwnd, GWL_STYLE, WS_POPUP);
+		SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN), SWP_SHOWWINDOW);
+		fullscreen = BORDERLESS;
+	}
+	else if (fullscreen == BORDERLESS) {
+		SetWindowLongPtr(hwnd, GWL_STYLE, WS_OVERLAPPEDWINDOW);
+		SetWindowPos(hwnd, HWND_NOTOPMOST, 10, 10, GetSystemMetrics(SM_CXSCREEN)-20, GetSystemMetrics(SM_CYSCREEN)-20, SWP_SHOWWINDOW);
+		fullscreen = WINDOWED;
+	}
+	return fullscreen;
+}
+
+sint16 dr_suspend_fullscreen()
+{
+	int was_fullscreen = 0;
+	if(  hwnd  &&  fullscreen  ) {
+		SetWindowLongPtr(hwnd, GWL_STYLE, WS_OVERLAPPEDWINDOW);
+		SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN), SWP_SHOWWINDOW);
+		was_fullscreen = fullscreen;
+		fullscreen = WINDOWED;
+	}
+	else {
+		ShowWindow(hwnd, SW_SHOWMINNOACTIVE);
+	}
+	return was_fullscreen;
+}
+
+void dr_restore_fullscreen(sint16 was_fullscreen)
+{
+	if(  hwnd  &&  was_fullscreen  ) {
+		SetWindowLongPtr(hwnd, GWL_STYLE, WS_EX_TOPMOST);
+		SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN), SWP_SHOWWINDOW);
+		was_fullscreen = fullscreen;
+	}
+	else {
+		ShowWindow(hwnd, SW_RESTORE);
+	}
+}
 
 // move cursor to the specified location
 void move_pointer(int x, int y)
@@ -426,7 +482,7 @@ LRESULT WINAPI WindowProc(HWND this_hwnd, UINT msg, WPARAM wParam, LPARAM lParam
 			return 0;
 
 		case WM_ACTIVATE: // may check, if we have to restore color depth
-			if(is_fullscreen) {
+			if(fullscreen) {
 				// avoid double calls
 				static bool while_handling = false;
 				if(while_handling) {
@@ -440,20 +496,6 @@ LRESULT WINAPI WindowProc(HWND this_hwnd, UINT msg, WPARAM wParam, LPARAM lParam
 					EnterCriticalSection( &redraw_underway );
 #endif
 					// try to force display mode and size
-					DEVMODE settings;
-
-					MEMZERO(settings);
-					settings.dmSize = sizeof(settings);
-					settings.dmFields = DM_BITSPERPEL | DM_PELSWIDTH | DM_PELSHEIGHT;
-#ifdef RGB555
-					settings.dmBitsPerPel = 15;
-#else
-					settings.dmBitsPerPel = COLOUR_DEPTH;
-#endif
-					settings.dmPelsWidth  = MaxSize.right;
-					settings.dmPelsHeight = MaxSize.bottom;
-					settings.dmDisplayFrequency = 0;
-
 					// should be always successful, since it worked as least once ...
 					ChangeDisplaySettings(&settings, CDS_FULLSCREEN);
 					is_not_top = false;
@@ -479,7 +521,7 @@ LRESULT WINAPI WindowProc(HWND this_hwnd, UINT msg, WPARAM wParam, LPARAM lParam
 			break;
 
 		case WM_GETMINMAXINFO:
-			if(is_fullscreen) {
+			if(fullscreen) {
 				LPMINMAXINFO lpmmi = (LPMINMAXINFO) lParam;
 				lpmmi->ptMaxPosition.x = 0;
 				lpmmi->ptMaxPosition.y = 0;
@@ -555,14 +597,14 @@ LRESULT WINAPI WindowProc(HWND this_hwnd, UINT msg, WPARAM wParam, LPARAM lParam
 				sys_event.type = SIM_SYSTEM;
 				sys_event.code = SYSTEM_RESIZE;
 
-				sys_event.new_window_size.w = (LOWORD(lParam)*32)/x_scale;
-				if (sys_event.new_window_size.w <= 0) {
-					sys_event.new_window_size.w = 4;
+				sys_event.new_window_size_w = (LOWORD(lParam)*32)/x_scale;
+				if (sys_event.new_window_size_w <= 0) {
+					sys_event.new_window_size_w = 4;
 				}
 
-				sys_event.new_window_size.h = (HIWORD(lParam)*32)/y_scale;
-				if (sys_event.new_window_size.h <= 1) {
-					sys_event.new_window_size.h = 64;
+				sys_event.new_window_size_h = (HIWORD(lParam)*32)/y_scale;
+				if (sys_event.new_window_size_h <= 1) {
+					sys_event.new_window_size_h = 64;
 				}
 			}
 			break;
@@ -853,8 +895,10 @@ LRESULT WINAPI WindowProc(HWND this_hwnd, UINT msg, WPARAM wParam, LPARAM lParam
 	if(  update_mouse  ) {
 		sys_event.key_mod = ModifierKeys();
 		sys_event.mb = last_mb = (wParam&3);
-		sys_event.mx      = (LOWORD(lParam) * 32)/x_scale;
-		sys_event.my      = (HIWORD(lParam) * 32)/y_scale;
+		sint16 x = LOWORD(lParam);
+		sys_event.mx      = (x * 32l)/x_scale;
+		sint16 y = HIWORD(lParam);
+		sys_event.my      = (y * 32l)/y_scale;
 	}
 
 
@@ -875,15 +919,6 @@ static void internal_GetEvents(bool const wait)
 
 
 void GetEvents()
-{
-	// already even processed?
-	if(sys_event.type==SIM_NOEVENT) {
-		internal_GetEvents(true);
-	}
-}
-
-
-void GetEventsNoWait()
 {
 	if (sys_event.type==SIM_NOEVENT  &&  PeekMessage(&msg, NULL, 0, 0, PM_NOREMOVE)) {
 		internal_GetEvents(false);
@@ -964,6 +999,13 @@ int main()
 }
 #endif
 
+
+const char* dr_get_locale()
+{
+	static char LanguageCode[5]="";
+	GetLocaleInfoA( GetUserDefaultUILanguage(), LOCALE_SISO639LANGNAME, LanguageCode, lengthof( LanguageCode ) );
+	return LanguageCode;
+}
 
 int CALLBACK WinMain(HINSTANCE const hInstance, HINSTANCE, LPSTR, int)
 {

@@ -25,7 +25,12 @@
 #include "../utils/simstring.h"
 #include "../io/raw_image.h"
 
+#include "../gui/simwin.h"
+#include "../dataobj/environment.h"
+
 #include "simgraph.h"
+
+#include "../obj/roadsign.h" // for signal status indicator
 
 
 #ifdef _MSC_VER
@@ -246,8 +251,6 @@ static font_t default_font;
 int default_font_ascent = 0;
 int default_font_linespace = 0;
 
-
-#define MAX_PLAYER_COUNT (16)
 
 #define RGBMAPSIZE (0x8000+LIGHT_COUNT+MAX_PLAYER_COUNT)
 
@@ -613,7 +616,7 @@ static const uint8 special_pal[SPECIAL_COLOR_COUNT*3] =
 	128, 64, 0,
 	193, 97, 0,
 	215, 107, 0,
-	255, 128, 0,
+	235, 118, 0,
 	255, 128, 0,
 	255, 149, 43,
 	255, 170, 85,
@@ -627,13 +630,13 @@ static const uint8 special_pal[SPECIAL_COLOR_COUNT*3] =
 	104, 148, 28,
 	128, 168, 44,
 	164, 164, 0,
+	180, 180, 0,
 	193, 193, 0,
 	215, 215, 0,
+	235, 235, 0,
 	255, 255, 0,
-	255, 255, 32,
 	255, 255, 64,
 	255, 255, 128,
-	255, 255, 172,
 	32, 4, 0,
 	64, 20, 8,
 	84, 28, 16,
@@ -2755,7 +2758,7 @@ void display_img_aux(const image_id n, scr_coord_val xp, scr_coord_val yp, const
 
 
 // local helper function for tiles buttons
-static void display_three_image_row( image_id i1, image_id i2, image_id i3, scr_rect row )
+static void display_three_image_row( image_id i1, image_id i2, image_id i3, scr_rect row, FLAGGED_PIXVAL)
 {
 	if(  i1!=IMG_EMPTY  ) {
 		scr_coord_val w = images[i1].w;
@@ -2788,72 +2791,76 @@ static void display_three_image_row( image_id i1, image_id i2, image_id i3, scr_
 	}
 }
 
-
-// this displays a 3x3 array of images to fit the scr_rect
-void display_img_stretch( const stretch_map_t &imag, scr_rect area )
+static scr_coord_val get_img_width(image_id img)
 {
-	scr_coord_val h_top = 0, h_bottom = 0;
-	scr_coord_val w_left = 0;
+	return img != IMG_EMPTY ? images[ img ].w : 0;
+}
+static scr_coord_val get_img_height(image_id img)
+{
+	return img != IMG_EMPTY ? images[ img ].h : 0;
+}
 
-	if(  imag[0][0]!=IMG_EMPTY  ) {
-		h_top = images[ imag[0][0] ].h;
-		w_left = images[ imag[0][0] ].w;
-	}
-	if(  imag[0][2]!=IMG_EMPTY  ) {
-		h_bottom = images[ imag[0][2] ].h;
-	}
+typedef void (*DISP_THREE_ROW_FUNC)(image_id, image_id, image_id, scr_rect, FLAGGED_PIXVAL);
 
-	// center vertically?
-	if(  imag[0][1] == IMG_EMPTY  &&  imag[2][1] == IMG_EMPTY  ) {
-		scr_coord_val h = h_top;
-		if(  imag[1][0]!=IMG_EMPTY  ) {
-			h = max( h, images[ imag[1][0] ].h );
-		}
+/**
+ * Base method to display a 3x3 array of images to fit the scr_rect.
+ * Special cases:
+ * - if images[*][1] are empty, display images[*][0] vertically aligned
+ * - if images[1][*] are empty, display images[0][*] horizontally aligned
+ */
+static void display_img_stretch_intern( const stretch_map_t &imag, scr_rect area, DISP_THREE_ROW_FUNC display_three_image_rowf, FLAGGED_PIXVAL color)
+{
+	scr_coord_val h_top    = max(max( get_img_height(imag[0][0]), get_img_height(imag[1][0])), get_img_height(imag[2][0]));
+	scr_coord_val h_middle = max(max( get_img_height(imag[0][1]), get_img_height(imag[1][1])), get_img_height(imag[2][1]));
+	scr_coord_val h_bottom = max(max( get_img_height(imag[0][2]), get_img_height(imag[1][2])), get_img_height(imag[2][2]));
+
+	// center vertically if images[*][1] are empty, display images[*][0]
+	if(  imag[0][1] == IMG_EMPTY  &&  imag[1][1] == IMG_EMPTY  &&  imag[2][1] == IMG_EMPTY  ) {
+		scr_coord_val h = max(h_top, get_img_height(imag[1][1]));
 		// center vertically
 		area.y += (area.h-h)/2;
 	}
 
-	// center horizontcally?
-	if(  imag[1][0] == IMG_EMPTY  &&  imag[1][2] == IMG_EMPTY  ) {
-		scr_coord_val w = w_left;
-		if(  imag[0][1]!=IMG_EMPTY  ) {
-			w = max( w, images[ imag[0][1] ].w );
-		}
+	// center horizontally if images[1][*] are empty, display images[0][*]
+	if(  imag[1][0] == IMG_EMPTY  &&  imag[1][1] == IMG_EMPTY  &&  imag[1][2] == IMG_EMPTY  ) {
+		scr_coord_val w_left = max(max( get_img_width(imag[0][0]), get_img_width(imag[0][1])), get_img_width(imag[0][2]));
 		// center vertically
-		area.x += (area.w-w)/2;
+		area.x += (area.w-w_left)/2;
 	}
 
 	// top row
-	display_three_image_row( imag[0][0], imag[1][0], imag[2][0], area );
+	display_three_image_rowf( imag[0][0], imag[1][0], imag[2][0], area, color);
 
 	// bottom row
-	if(  imag[0][2]!=IMG_EMPTY  ) {
+	if(  h_bottom > 0  ) {
 		scr_rect row( area.x, area.y+area.h-h_bottom, area.w, h_bottom );
-		display_three_image_row( imag[0][2], imag[1][2], imag[2][2], row );
+		display_three_image_rowf( imag[0][2], imag[1][2], imag[2][2], row, color);
 	}
 
 	// now stretch the middle
-	if(  imag[0][1]!=IMG_EMPTY  ||  imag[1][1]!=IMG_EMPTY  ) {
-		scr_rect row( area.x, area.y+h_top, area.w, area.h-h_top-h_bottom );
+	if(  h_middle > 0  ) {
+		scr_rect row( area.x, area.y+h_top, area.w, area.h-h_top-h_bottom);
 		// tile it wide
-		scr_coord_val h = imag[0][1]!=IMG_EMPTY ? images[imag[0][1]].h : imag[1][1]!=IMG_EMPTY;
-		while(  h <= row.h  ) {
-			display_three_image_row( imag[0][1], imag[1][1], imag[2][1], row );
-			row.y += h;
-			row.h -= h;
+		while(  h_middle <= row.h  ) {
+			display_three_image_rowf( imag[0][1], imag[1][1], imag[2][1], row, color);
+			row.y += h_middle;
+			row.h -= h_middle;
 		}
 		// for the rest we have to clip the rectangle
 		if(  row.h > 0  ) {
 			clip_dimension const cl = display_get_clip_wh();
 			display_set_clip_wh( cl.x, cl.y, cl.w, max(0,min(row.get_bottom(),cl.yy)-cl.y) );
-			display_three_image_row( imag[0][1], imag[1][1], imag[2][1], row );
+			display_three_image_rowf( imag[0][1], imag[1][1], imag[2][1], row, color);
 			display_set_clip_wh(cl.x, cl.y, cl.w, cl.h );
 		}
 	}
 }
 
+void display_img_stretch( const stretch_map_t &imag, scr_rect area)
+{
+	display_img_stretch_intern(imag, area, display_three_image_row, 0);
+}
 
-// local helper function for tiles buttons
 static void display_three_blend_row( image_id i1, image_id i2, image_id i3, scr_rect row, FLAGGED_PIXVAL color )
 {
 	if(  i1!=IMG_EMPTY  ) {
@@ -2891,51 +2898,7 @@ static void display_three_blend_row( image_id i1, image_id i2, image_id i3, scr_
 // this displays a 3x3 array of images to fit the scr_rect like above, but blend the color
 void display_img_stretch_blend( const stretch_map_t &imag, scr_rect area, FLAGGED_PIXVAL color )
 {
-	scr_coord_val h_top = 0, h_bottom = 0;
-	if(  imag[0][0]!=IMG_EMPTY  ) {
-		h_top = images[ imag[0][0] ].h;
-	}
-	if(  imag[0][2]!=IMG_EMPTY  ) {
-		h_bottom = images[ imag[0][2] ].h;
-	}
-
-	// center vertically?
-	if(  imag[0][1] == IMG_EMPTY  ) {
-		scr_coord_val h = h_top;
-		if(  imag[1][0]!=IMG_EMPTY  ) {
-			h = max( h, images[ imag[1][0] ].h );
-		}
-		// center vertically
-		area.y += (area.h-h)/2;
-	}
-
-	// top row
-	display_three_blend_row( imag[0][0], imag[1][0], imag[2][0], area, color );
-
-	// bottom row
-	if(  imag[0][2]!=IMG_EMPTY  ) {
-		scr_rect row( area.x, area.y+area.h-h_bottom, area.w, h_bottom );
-		display_three_blend_row( imag[0][2], imag[1][2], imag[2][2], row, color );
-	}
-
-	// now stretch the middle
-	if(  imag[0][1]!=IMG_EMPTY  ) {
-		scr_rect row( area.x, area.y+h_top, area.w, area.h-h_top-h_bottom );
-		// tile it wide
-		scr_coord_val h = images[imag[0][1]].h;
-		while(  h <= row.h  ) {
-			display_three_blend_row( imag[0][1], imag[1][1], imag[2][1], row, color );
-			row.y += h;
-			row.h -= h;
-		}
-		// for the rest we have to clip the rectangle
-		if(  row.h > 0  ) {
-			clip_dimension const cl = display_get_clip_wh();
-			display_set_clip_wh( cl.x, cl.y, cl.w, max(0,min(row.get_bottom(),cl.yy)-cl.y) );
-			display_three_blend_row( imag[0][1], imag[1][1], imag[2][1], row, color );
-			display_set_clip_wh(cl.x, cl.y, cl.w, cl.h );
-		}
-	}
+	display_img_stretch_intern(imag, area, display_three_blend_row, color);
 }
 
 
@@ -4370,7 +4333,14 @@ utf32 get_next_char_with_metrics(const char* &text, unsigned char &byte_length, 
 /* returns true, if this is a valid character */
 bool has_character( utf16 char_code )
 {
-	return default_font.is_valid_glyph(char_code);
+	bool b1 = default_font.is_loaded();
+	bool b2 = char_code < default_font.glyphs.size();
+	font_t::glyph_t& gl = default_font.glyphs[char_code];
+	uint8  ad = gl.advance;
+	return b1 &&  b2  &&  ad!=0xFF;
+
+	// this return false for some reason on CJK for valid characters ?!?
+	// return default_font.is_valid_glyph(char_code);
 }
 
 
@@ -4652,12 +4622,9 @@ int display_text_proportional_len_clip_rgb(scr_coord_val x, scr_coord_val y, con
 }
 
 
-/**
- * Displays a string which is abbreviated by the (language specific) ellipsis character if too wide
- * If enough space is given then it just displays the full string
- * @returns screen_width
- */
-scr_coord_val display_proportional_ellipsis_rgb( scr_rect r, const char *text, int align, const PIXVAL color, const bool dirty, bool shadowed, PIXVAL shadow_color)
+/// Displays a string which is abbreviated by the (language specific) ellipsis character if too wide
+/// If enough space is given then it just displays the full string
+void display_proportional_ellipsis_rgb( scr_rect r, const char *text, int align, const PIXVAL color, const bool dirty, bool shadowed, PIXVAL shadow_color)
 {
 	const scr_coord_val ellipsis_width = translator::get_lang()->ellipsis_width;
 	const scr_coord_val max_screen_width = r.w;
@@ -4705,8 +4672,9 @@ scr_coord_val display_proportional_ellipsis_rgb( scr_rect r, const char *text, i
 			if (shadowed) {
 				display_text_proportional_len_clip_rgb( r.x+w+1, r.y+1, translator::translate("..."), ALIGN_LEFT | DT_CLIP, shadow_color, dirty, -1  CLIP_NUM_DEFAULT);
 			}
-			w += display_text_proportional_len_clip_rgb( r.x+w, r.y, translator::translate("..."), ALIGN_LEFT | DT_CLIP, color, dirty, -1  CLIP_NUM_DEFAULT);
-			return w;
+
+			display_text_proportional_len_clip_rgb( r.x+w, r.y, translator::translate("..."), ALIGN_LEFT | DT_CLIP, color, dirty, -1  CLIP_NUM_DEFAULT);
+			return;
 		}
 		else {
 			// if this fits, end of string
@@ -4723,9 +4691,9 @@ scr_coord_val display_proportional_ellipsis_rgb( scr_rect r, const char *text, i
 		default: ;
 	}
 	if (shadowed) {
-		display_text_proportional_len_clip_rgb( r.x, r.y, text, ALIGN_LEFT | DT_CLIP, shadow_color, dirty, -1  CLIP_NUM_DEFAULT);
+		display_text_proportional_len_clip_rgb( r.x+1, r.y+1, text, ALIGN_LEFT | DT_CLIP, shadow_color, dirty, -1  CLIP_NUM_DEFAULT);
 	}
-	return display_text_proportional_len_clip_rgb( r.x, r.y, text, ALIGN_LEFT | DT_CLIP, color, dirty, -1  CLIP_NUM_DEFAULT);
+	display_text_proportional_len_clip_rgb( r.x, r.y, text, ALIGN_LEFT | DT_CLIP, color, dirty, -1  CLIP_NUM_DEFAULT);
 }
 
 
@@ -4747,9 +4715,9 @@ void display_ddd_box_rgb(scr_coord_val x1, scr_coord_val y1, scr_coord_val w, sc
 void display_outline_proportional_rgb(scr_coord_val xpos, scr_coord_val ypos, PIXVAL text_color, PIXVAL shadow_color, const char *text, int dirty, sint32 len)
 {
 	const int flags = ALIGN_LEFT | DT_CLIP;
-	display_text_proportional_len_clip_rgb(xpos - 1, ypos - 1 + (12 - LINESPACE) / 2, text, flags, shadow_color, dirty, len  CLIP_NUM_DEFAULT);
-	display_text_proportional_len_clip_rgb(xpos + 1, ypos + 1 + (12 - LINESPACE) / 2, text, flags, shadow_color, dirty, len  CLIP_NUM_DEFAULT);
-	display_text_proportional_len_clip_rgb(xpos, ypos + (12 - LINESPACE) / 2, text, flags, text_color, dirty, len  CLIP_NUM_DEFAULT);
+	display_text_proportional_len_clip_rgb(xpos - 1, ypos    , text, flags, shadow_color, dirty, len  CLIP_NUM_DEFAULT);
+	display_text_proportional_len_clip_rgb(xpos + 1, ypos + 2, text, flags, shadow_color, dirty, len  CLIP_NUM_DEFAULT);
+	display_text_proportional_len_clip_rgb(xpos, ypos + 1, text, flags, text_color, dirty, len  CLIP_NUM_DEFAULT);
 }
 
 
@@ -4779,22 +4747,25 @@ void display_ddd_box_clip_rgb(scr_coord_val x1, scr_coord_val y1, scr_coord_val 
 /**
  * display text in 3d box with clipping
  */
-void display_ddd_proportional_clip(scr_coord_val xpos, scr_coord_val ypos, scr_coord_val width, scr_coord_val hgt, FLAGGED_PIXVAL ddd_color, FLAGGED_PIXVAL text_color, const char *text, int dirty  CLIP_NUM_DEF)
+void display_ddd_proportional_clip(scr_coord_val xpos, scr_coord_val ypos, FLAGGED_PIXVAL ddd_color, FLAGGED_PIXVAL text_color, const char *text, int dirty  CLIP_NUM_DEF)
 {
-	const int halfheight = LINESPACE / 2 + 1;
+	const int vpadding = LINESPACE / 7;
+	const int hpadding = LINESPACE / 4;
+
+	scr_coord_val width = proportional_string_width(text);
 
 	PIXVAL lighter = display_blend_colors(ddd_color, color_idx_to_rgb(COL_WHITE), 25);
 	PIXVAL darker  = display_blend_colors(ddd_color, color_idx_to_rgb(COL_BLACK), 25);
 
-	display_fillbox_wh_clip_rgb( xpos - 2, ypos - halfheight - 1 - hgt, width, halfheight * 2 + 2, ddd_color, dirty CLIP_NUM_PAR );
+	display_fillbox_wh_clip_rgb( xpos+1, ypos - vpadding + 1, width+2*hpadding-2, LINESPACE+2*vpadding-2, ddd_color, dirty CLIP_NUM_PAR);
 
-	display_fillbox_wh_clip_rgb( xpos - 1, ypos - halfheight - 1 - hgt, width - 2, 1, lighter, dirty );
-	display_fillbox_wh_clip_rgb( xpos - 1, ypos + halfheight - hgt,     width - 2, 1, darker,  dirty );
+	display_fillbox_wh_clip_rgb( xpos, ypos - vpadding, width + 2*hpadding - 2, 1, lighter, dirty );
+	display_fillbox_wh_clip_rgb( xpos, ypos + LINESPACE + vpadding - 1, width + 2*hpadding - 2, 1, darker,  dirty );
 
-	display_vline_wh_clip_rgb( xpos - 2,         ypos - halfheight - 1 - hgt, halfheight * 2 + 2, lighter, dirty );
-	display_vline_wh_clip_rgb( xpos + width - 3, ypos - halfheight - 1 - hgt, halfheight * 2 + 2, darker,  dirty );
+	display_vline_wh_clip_rgb( xpos, ypos - vpadding - 1, LINESPACE + vpadding * 2 - 1, lighter, dirty );
+	display_vline_wh_clip_rgb( xpos + width + 2*hpadding, ypos - vpadding - 1, LINESPACE + vpadding * 2 - 1, darker,  dirty );
 
-	display_text_proportional_len_clip_rgb( xpos + 2, ypos - 5 + (12 - LINESPACE) / 2, text, ALIGN_LEFT | DT_CLIP, text_color, dirty, -1);
+	display_text_proportional_len_clip_rgb( xpos+hpadding, ypos+1, text, ALIGN_LEFT | DT_CLIP, text_color, dirty, -1);
 }
 
 
@@ -4818,7 +4789,7 @@ int display_multiline_text_rgb(scr_coord_val x, scr_coord_val y, const char *buf
 				max_px_len = px_len;
 			}
 			y += LINESPACE;
-		} while (buf = (next ? next+1 : NULL), buf != NULL);
+		} while ((void)(buf = (next ? next+1 : NULL)), buf != NULL);
 	}
 	return max_px_len;
 }
@@ -4984,6 +4955,101 @@ void display_filled_circle_rgb( scr_coord_val x0, scr_coord_val  y0, int radius,
 }
 
 
+
+void display_signal_direction_rgb(scr_coord_val x, scr_coord_val y, uint8 way_dir, uint8 sig_dir, PIXVAL col1, PIXVAL col1_dark, bool is_diagonal, uint8 slope )
+{
+	uint8 width  = is_diagonal ? current_tile_raster_width/6*0.353 :current_tile_raster_width/6;
+	const uint8 height = is_diagonal ?current_tile_raster_width/6*0.353 :current_tile_raster_width/12;
+	const uint8 thickness = max( current_tile_raster_width/36, 2);
+
+	x += current_tile_raster_width/2;
+	y += (current_tile_raster_width*9)/16;
+
+	if (is_diagonal) {
+
+		if (way_dir == ribi_t::northeast || way_dir == ribi_t::southwest) {
+			// vertical
+			x += (way_dir==ribi_t::northeast) ?current_tile_raster_width/4 : (-current_tile_raster_width/4);
+			y += current_tile_raster_width/16;
+			width = width<<2; // 4x
+
+			// upper
+			for (uint8 xoff = 0; xoff < width/2; xoff++) {
+				const uint8 yoff = (uint8)((xoff+1)/2);
+				// up
+				if (sig_dir & ribi_t::east || sig_dir & ribi_t::south) {
+					display_vline_wh_clip_rgb(x + xoff, y+yoff, width/4 - yoff, col1, true);
+					display_vline_wh_clip_rgb(x-xoff-1, y+yoff, width/4 - yoff, col1, true);
+				}
+				// down
+				if (sig_dir & ribi_t::west || sig_dir & ribi_t::north) {
+					display_vline_wh_clip_rgb(x + xoff, y+current_tile_raster_width/6,              width/4-yoff, col1,      true);
+					display_vline_wh_clip_rgb(x + xoff, y+current_tile_raster_width/6+width/4-yoff, thickness,    col1_dark, true);
+					display_vline_wh_clip_rgb(x-xoff-1, y+current_tile_raster_width/6,              width/4-yoff, col1,      true);
+					display_vline_wh_clip_rgb(x-xoff-1, y+current_tile_raster_width/6+width/4-yoff, thickness,    col1_dark, true);
+				}
+			}
+			// up
+			if (sig_dir & ribi_t::east || sig_dir & ribi_t::south) {
+				display_fillbox_wh_clip_rgb(x - width/2, y + width/4, width, thickness, col1_dark, true);
+			}
+		}
+		else {
+			// horizontal
+			y -= current_tile_raster_width/12;
+			if (way_dir == ribi_t::southeast) {
+				y += current_tile_raster_width/4;
+			}
+
+			for (uint8 xoff = 0; xoff < width*2; xoff++) {
+				const uint8 h = width*2 - (scr_coord_val)(xoff + 1);
+				// left
+				if (sig_dir & ribi_t::north || sig_dir & ribi_t::east) {
+					display_vline_wh_clip_rgb(x - xoff - width*2, y + (scr_coord_val)((xoff+1)/2),   h, col1, true);
+					display_vline_wh_clip_rgb(x - xoff - width*2, y + (scr_coord_val)((xoff+1)/2)+h, thickness, col1_dark, true);
+				}
+				// right
+				if (sig_dir & ribi_t::south || sig_dir & ribi_t::west) {
+					display_vline_wh_clip_rgb(x + xoff + width*2, y + (scr_coord_val)((xoff+1)/2),   h, col1, true);
+					display_vline_wh_clip_rgb(x + xoff + width*2, y + (scr_coord_val)((xoff+1)/2)+h, thickness, col1_dark, true);
+				}
+			}
+		}
+	}
+	else {
+		if (sig_dir & ribi_t::south) {
+			// upper right
+			scr_coord_val slope_offset_y = corner_se( slope )*TILE_HEIGHT_STEP;
+			for (uint8 xoff = 0; xoff < width; xoff++) {
+				display_vline_wh_clip_rgb( x + xoff, y - slope_offset_y, (scr_coord_val)(xoff/2) + 1, col1, true );
+				display_vline_wh_clip_rgb( x + xoff, y - slope_offset_y + (scr_coord_val)(xoff/2) + 1, thickness, col1_dark, true );
+			}
+		}
+		if (sig_dir & ribi_t::east) {
+			scr_coord_val slope_offset_y = corner_se( slope )*TILE_HEIGHT_STEP;
+			for (uint8 xoff = 0; xoff < width; xoff++) {
+				display_vline_wh_clip_rgb(x - xoff - 1, y - slope_offset_y, (scr_coord_val)(xoff/2) + 1, col1, true);
+				display_vline_wh_clip_rgb(x - xoff - 1, y - slope_offset_y + (scr_coord_val)(xoff/2) + 1, thickness, col1_dark, true);
+			}
+		}
+		if (sig_dir & ribi_t::west) {
+			scr_coord_val slope_offset_y = corner_nw( slope )*TILE_HEIGHT_STEP;
+			for (uint8 xoff = 0; xoff < width; xoff++) {
+				display_vline_wh_clip_rgb(x + xoff, y - slope_offset_y + height*2 - (scr_coord_val)(xoff/2) + 1, (scr_coord_val)(xoff/2) + 1, col1, true);
+				display_vline_wh_clip_rgb(x + xoff, y - slope_offset_y + height*2 + 1, thickness, col1_dark, true);
+			}
+		}
+		if (sig_dir & ribi_t::north) {
+			scr_coord_val slope_offset_y = corner_nw( slope )*TILE_HEIGHT_STEP;
+			for (uint8 xoff = 0; xoff < width; xoff++) {
+				display_vline_wh_clip_rgb(x - xoff - 1, y - slope_offset_y + height*2 - (scr_coord_val)(xoff/2) + 1, (scr_coord_val)(xoff/2) + 1, col1, true);
+				display_vline_wh_clip_rgb(x - xoff - 1, y - slope_offset_y + height*2 + 1, thickness, col1_dark, true);
+			}
+		}
+	}
+}
+
+
 /**
  * Print a bezier curve between points A and B
  * @Ax,Ay=start coordinate of Bezier curve
@@ -5069,16 +5135,20 @@ void display_flush_buffer()
 	{
 		0, 1, 28, 2, 29, 14, 24, 3, 30, 22, 20, 15, 25, 17, 4, 8, 31, 27, 13, 23, 21, 19, 16, 7, 26, 12, 18, 6, 11, 5, 10, 9
 	};
+
 #ifdef USE_SOFTPOINTER
 	ex_ord_update_mx_my();
+
+	const scr_coord_val ticker_ypos_bottom = display_get_height() - win_get_statusbar_height() - (env_t::menupos == MENU_BOTTOM) * env_t::iconsize.h;
+	const scr_coord_val ticker_ypos_top = ticker_ypos_bottom - TICKER_HEIGHT;
 
 	// use mouse pointer image if available
 	if (softpointer != -1 && standard_pointer >= 0) {
 		display_color_img(standard_pointer, sys_event.mx, sys_event.my, 0, false, true  CLIP_NUM_DEFAULT);
 
 		// if software emulated mouse pointer is over the ticker, redraw it totally at next occurs
-		if (!ticker::empty() && sys_event.my+images[standard_pointer].h >= disp_height-TICKER_YPOS_BOTTOM &&
-		   sys_event.my <= disp_height-TICKER_YPOS_BOTTOM+TICKER_HEIGHT) {
+		if (!ticker::empty() && sys_event.my+images[standard_pointer].h >= ticker_ypos_top &&
+		   sys_event.my <= ticker_ypos_bottom) {
 			ticker::set_redraw_all(true);
 		}
 	}
@@ -5090,8 +5160,7 @@ void display_flush_buffer()
 		display_direct_line_rgb( sys_event.mx, sys_event.my-2, sys_event.mx, sys_event.my+2, color_idx_to_rgb(COL_BLACK) );
 
 		// if crosshair is over the ticker, redraw it totally at next occurs
-		if(!ticker::empty() && sys_event.my+2 >= disp_height-TICKER_YPOS_BOTTOM &&
-		   sys_event.my-2 <= disp_height-TICKER_YPOS_BOTTOM+TICKER_HEIGHT) {
+		if(!ticker::empty() && sys_event.my+2 >= ticker_ypos_top && sys_event.my-2 <= ticker_ypos_bottom) {
 			ticker::set_redraw_all(true);
 		}
 	}
@@ -5233,7 +5302,7 @@ void display_show_load_pointer(int loading)
 /**
  * Initialises the graphics module
  */
-bool simgraph_init(scr_size window_size, bool full_screen)
+bool simgraph_init(scr_size window_size, sint16 full_screen)
 {
 	disp_actual_width = window_size.w;
 	disp_height = window_size.h;

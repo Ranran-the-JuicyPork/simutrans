@@ -5,7 +5,6 @@
 
 #include <string.h>
 
-#include "../gui_frame.h"
 #include "gui_textinput.h"
 #include "../simwin.h"
 #include "../../dataobj/translator.h"
@@ -33,13 +32,13 @@ gui_textinput_t::gui_textinput_t() :
 
 scr_size gui_textinput_t::get_min_size() const
 {
-	return scr_size( 16*LINESPACE, ::max(LINESPACE+4,D_BUTTON_HEIGHT) );
+	return scr_size(4*LINESPACE, ::max(LINESPACE+4, D_EDIT_HEIGHT) );
 }
 
 
 scr_size gui_textinput_t::get_max_size() const
 {
-	return scr_size( scr_size::inf.w, ::max(LINESPACE+4,D_BUTTON_HEIGHT) );
+	return scr_size( scr_size::inf.w, ::max(LINESPACE+4, D_EDIT_HEIGHT) );
 }
 
 
@@ -177,8 +176,8 @@ bool gui_textinput_t::infowin_event(const event_t *ev)
 						// Ctrl key pressed -> skip over to the start of the previous word (as delimited by space(s))
 						if(  IS_CONTROL_PRESSED(ev)  ) {
 							const char* tmp_text = text + head_cursor_pos;
-							uint8 byte_length;
-							uint8 pixel_width;
+							uint8 byte_length = 0;
+							uint8 pixel_width = 0;
 							// first skip over all contiguous space characters to the left
 							while(  head_cursor_pos>0  &&  get_prev_char_with_metrics(tmp_text, text, byte_length, pixel_width)==SIM_KEY_SPACE  ) {
 								head_cursor_pos -= byte_length;
@@ -206,8 +205,8 @@ bool gui_textinput_t::infowin_event(const event_t *ev)
 						// Ctrl key pressed -> skip over to the start of the next word (as delimited by space(s))
 						if(  IS_CONTROL_PRESSED(ev)  ) {
 							const char* tmp_text = text + head_cursor_pos;
-							uint8 byte_length;
-							uint8 pixel_width;
+							uint8 byte_length = 0;
+							uint8 pixel_width = 0;
 							// first skip over all contiguous non-space characters to the right
 							while(  head_cursor_pos<len  &&  get_next_char_with_metrics(tmp_text, byte_length, pixel_width)!=SIM_KEY_SPACE  ) {
 								head_cursor_pos += byte_length;
@@ -483,6 +482,11 @@ bool gui_textinput_t::infowin_event(const event_t *ev)
 		}
 		return true;
 	}
+	else if(  ev->ev_class == INFOWIN   &&  ev->ev_code == WIN_CLOSE  &&  focus_received  ) {
+		// release focus on close and close keyboard
+		dr_stop_textinput();
+		focus_received = false;
+	}
 	return false;
 }
 
@@ -659,7 +663,6 @@ bool gui_hidden_textinput_t::infowin_event(const event_t *ev)
 	else {
 		return gui_textinput_t::infowin_event( ev );
 	}
-	return false;
 }
 
 

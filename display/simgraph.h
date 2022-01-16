@@ -128,7 +128,7 @@ int zoom_factor_down();
 /**
  * Initialises the graphics module
  */
-bool simgraph_init(scr_size window_size, bool fullscreen);
+bool simgraph_init(scr_size window_size, sint16 fullscreen);
 bool is_display_init();
 void simgraph_exit();
 void simgraph_resize(scr_size new_window_size);
@@ -331,14 +331,11 @@ int display_text_proportional_len_clip_rgb(scr_coord_val x, scr_coord_val y, con
 #define display_proportional_clip_rgb(          x, y, txt, align, color, dirty)       display_text_proportional_len_clip_rgb( x, y, txt, align | DT_CLIP, color, dirty, -1 )
 
 
-/*
- * Display a string that is abbreviated by the (language specific) ellipsis character if too wide
- * If enough space is given, it just display the full string
- * @returns screen_width
- */
-scr_coord_val display_proportional_ellipsis_rgb( scr_rect r, const char *text, int align, const PIXVAL color, const bool dirty, bool shadowed = false, PIXVAL shadow_color = 0 );
+/// Display a string that is abbreviated by the (language specific) ellipsis character if too wide
+/// If enough space is given, it just display the full string
+void display_proportional_ellipsis_rgb( scr_rect r, const char *text, int align, const PIXVAL color, const bool dirty, bool shadowed = false, PIXVAL shadow_color = 0 );
 
-void display_ddd_proportional_clip(scr_coord_val xpos, scr_coord_val ypos, scr_coord_val width, scr_coord_val hgt, FLAGGED_PIXVAL ddd_farbe, FLAGGED_PIXVAL text_farbe, const char *text, int dirty  CLIP_NUM_DEF CLIP_NUM_DEFAULT_ZERO);
+void display_ddd_proportional_clip(scr_coord_val xpos, scr_coord_val ypos, FLAGGED_PIXVAL ddd_farbe, FLAGGED_PIXVAL text_farbe, const char *text, int dirty  CLIP_NUM_DEF CLIP_NUM_DEFAULT_ZERO);
 
 
 int display_multiline_text_rgb(scr_coord_val x, scr_coord_val y, const char *inbuf, PIXVAL color);
@@ -351,6 +348,7 @@ void display_filled_circle_rgb( scr_coord_val x0, scr_coord_val  y0, int radius,
 void draw_bezier_rgb(scr_coord_val Ax, scr_coord_val Ay, scr_coord_val Bx, scr_coord_val By, scr_coord_val ADx, scr_coord_val ADy, scr_coord_val BDx, scr_coord_val BDy, const PIXVAL colore, scr_coord_val draw, scr_coord_val dontDraw);
 
 void display_right_triangle_rgb(scr_coord_val x, scr_coord_val y, scr_coord_val height, const PIXVAL colval, const bool dirty);
+void display_signal_direction_rgb(scr_coord_val x, scr_coord_val y, uint8 way_dir, uint8 sig_dir, PIXVAL col1, PIXVAL col1_dark, bool is_diagonal=false, uint8 slope = 0 );
 
 void display_set_clip_wh(scr_coord_val x, scr_coord_val y, scr_coord_val w, scr_coord_val h  CLIP_NUM_DEF CLIP_NUM_DEFAULT_ZERO, bool fit = false);
 clip_dimension display_get_clip_wh(CLIP_NUM_DEF0 CLIP_NUM_DEFAULT_ZERO);

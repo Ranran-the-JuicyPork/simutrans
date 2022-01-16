@@ -105,6 +105,11 @@
 #include "player/ai_goods.h"
 #include "player/ai_scripted.h"
 
+#include "io/rdwr/adler32_stream.h"
+
+#include "pathes.h"
+
+
 // forward declaration - management of rotation for scripting
 namespace script_api
 {
@@ -151,10 +156,10 @@ static world_thread_param_t world_thread_param[MAX_THREADS];
 void *karte_t::world_xy_loop_thread(void *ptr)
 {
 	world_thread_param_t *param = reinterpret_cast<world_thread_param_t *>(ptr);
-	while(true) {
-		if(param->keep_running) {
-			simthread_barrier_wait( &world_barrier_start ); // wait for all to start
-		}
+
+	bool keep_running = false;
+	do {
+		simthread_barrier_wait( &world_barrier_start ); // wait for all to start
 
 		sint16 x_min = 0;
 		sint16 x_max = param->x_step;
@@ -174,15 +179,14 @@ void *karte_t::world_xy_loop_thread(void *ptr)
 			x_max = min(x_max + param->x_step, param->x_world_max);
 		}
 
-		if(param->keep_running) {
-			simthread_barrier_wait( &world_barrier_end ); // wait for all to finish
-		}
-		else {
-			return NULL;
-		}
-	}
+		// the main thread writes to param->keep_running between world_barrier_end and world_barrier_start
+		// so we have to copy the old value
+		keep_running = param->keep_running;
 
-	return ptr;
+		simthread_barrier_wait( &world_barrier_end ); // wait for all to finish
+	} while (keep_running);
+
+	return NULL;
 }
 #endif
 
@@ -233,20 +237,14 @@ void karte_t::world_xy_loop(xy_loop_func function, uint8 flags)
 		for(  int t = 0;  t < env_t::num_threads - 1;  t++  ) {
 			if(  pthread_create( &thread[t], &attr, world_xy_loop_thread, (void *)&world_thread_param[t] )  ) {
 				dbg->fatal( "karte_t::world_xy_loop()", "cannot multithread, error at thread #%i", t+1 );
-				return;
 			}
 		}
 		spawned_world_threads = true;
 		pthread_attr_destroy( &attr );
 	}
 
-	// and start processing
-	simthread_barrier_wait( &world_barrier_start );
-
-	// the last we can run ourselves
+	// and start processing; the last we can run ourselves
 	world_xy_loop_thread(&world_thread_param[env_t::num_threads-1]);
-
-	simthread_barrier_wait( &world_barrier_end );
 
 	// return from thread
 	for(  int t = 0;  t < env_t::num_threads - 1;  t++  ) {
@@ -612,8 +610,8 @@ void karte_t::init_tiles()
 		// old default: AI 3 passenger, other goods
 		players[i] = (i<2) ? new player_t(i) : NULL;
 	}
-	active_player = players[0];
-	active_player_nr = 0;
+	active_player = players[HUMAN_PLAYER_NR];
+	active_player_nr = HUMAN_PLAYER_NR;
 
 	// defaults without timeline
 	average_speed[0] = 60;
@@ -749,7 +747,7 @@ void karte_t::create_rivers( sint16 number )
 		for(  sint32 i=0;  i<256  &&  !valid_water_tiles.empty();  i++  ) {
 			koord const end = pick_any(valid_water_tiles);
 			valid_water_tiles.remove( end );
-			way_builder_t riverbuilder(players[1]);
+			way_builder_t riverbuilder(get_public_player());
 			riverbuilder.init_builder(way_builder_t::river, river_desc);
 			sint16 dist = koord_distance(start,end);
 			riverbuilder.set_maximum( dist*50 );
@@ -794,7 +792,7 @@ void karte_t::distribute_cities(int new_city_count, sint32 new_mean_citizen_coun
 			uint32 tbegin = dr_time();
 #endif
 			for(  int i=0;  i<new_city_count;  i++  ) {
-				stadt_t* s = new stadt_t(players[1], (*pos)[i], 1 );
+				stadt_t* s = new stadt_t(get_public_player(), (*pos)[i], 1 );
 				DBG_DEBUG("karte_t::distribute_cities()","Erzeuge stadt %i with %ld inhabitants",i,(s->get_city_history_month())[HIST_CITIZENS] );
 				if (s->get_buildings() > 0) {
 					add_city(s);
@@ -879,7 +877,7 @@ void karte_t::distribute_cities(int new_city_count, sint32 new_mean_citizen_coun
 			desc = way_builder_t::weg_search(road_wt,80,get_timeline_year_month(),type_flat);
 		}
 
-		way_builder_t bauigel (players[1] );
+		way_builder_t bauigel(get_public_player());
 		bauigel.init_builder(way_builder_t::strasse | way_builder_t::terraform_flag, desc, tunnel_builder_t::get_tunnel_desc(road_wt,15,get_timeline_year_month()), bridge_builder_t::find_bridge(road_wt,15,get_timeline_year_month()) );
 		bauigel.set_keep_existing_ways(true);
 		bauigel.set_maximum(env_t::intercity_road_length);
@@ -959,7 +957,7 @@ void karte_t::distribute_cities(int new_city_count, sint32 new_mean_citizen_coun
 			route_t verbindung;
 			vehicle_t* test_driver;
 			vehicle_desc_t test_drive_desc(road_wt, 500, vehicle_desc_t::diesel );
-			test_driver = vehicle_builder_t::build(koord3d(), players[1], NULL, &test_drive_desc);
+			test_driver = vehicle_builder_t::build(koord3d(), get_public_player(), NULL, &test_drive_desc);
 			test_driver->set_flag( obj_t::not_on_map );
 
 			bool ready=false;
@@ -1297,7 +1295,7 @@ DBG_DEBUG("karte_t::init()","built timeline");
 		zeiger = new zeiger_t(koord3d::invalid, NULL );
 	}
 	// finishes the line preparation and sets id 0 to invalid ...
-	players[0]->simlinemgmt.finish_rd();
+	players[HUMAN_PLAYER_NR]->simlinemgmt.finish_rd();
 
 	set_tool( tool_t::general_tool[TOOL_QUERY], get_active_player() );
 
@@ -1309,8 +1307,8 @@ DBG_DEBUG("karte_t::init()","built timeline");
 		}
 	}
 
-	active_player_nr = 0;
-	active_player = players[0];
+	active_player_nr = HUMAN_PLAYER_NR;
+	active_player = players[HUMAN_PLAYER_NR];
 	tool_t::update_toolbars();
 
 	set_dirty();
@@ -3114,7 +3112,7 @@ bool karte_t::change_player_tool(uint8 cmd, uint8 player_nr, uint16 param, bool 
 void karte_t::set_tool( tool_t *tool_in, player_t *player )
 {
 	if(  get_random_mode()&LOAD_RANDOM  ) {
-		dbg->warning("karte_t::set_tool", "Ignored tool %i during loading.", tool_in->get_id() );
+		dbg->warning("karte_t::set_tool", "Ignored tool %s during loading.", tool_in->get_name() );
 		return;
 	}
 	bool needs_check = !tool_in->no_check();
@@ -3461,12 +3459,17 @@ bool karte_t::rem_fab(fabrik_t *fab)
 		halthandle_t list[16];
 		const uint8 count = plan->get_haltlist_count();
 		assert(count<16);
-		memcpy( list, plan->get_haltlist(), count*sizeof(halthandle_t) );
-		for( uint8 i=0;  i<count;  i++  ) {
-			// first remove all the tiles that do not connect
-			plan->remove_from_haltlist( list[i] );
-			// then reconnect
-			list[i]->verbinde_fabriken();
+		assert((count == 0) || (plan->get_haltlist() != NULL));
+
+		if (count > 0) {
+			memcpy( list, plan->get_haltlist(), count*sizeof(halthandle_t) );
+
+			for( uint8 i=0;  i<count;  i++  ) {
+				// first remove all the tiles that do not connect
+				plan->remove_from_haltlist( list[i] );
+				// then reconnect
+				list[i]->verbinde_fabriken();
+			}
 		}
 
 		// remove all links from factories
@@ -3621,7 +3624,7 @@ void karte_t::sync_step(uint32 delta_t, bool do_sync_step, bool display )
 
 		// just for progress
 		if(  delta_t > 10000  ) {
-			dbg->error( "karte_t::sync_step()", "delta_t too large: %li", delta_t );
+			dbg->error( "karte_t::sync_step()", "delta_t (%u) too large, limiting to 10000", delta_t );
 			delta_t = 10000;
 		}
 		ticks += delta_t;
@@ -4124,7 +4127,7 @@ void karte_t::step()
 
 		// needs plausibility check?!?
 		if(delta_t>10000) {
-			dbg->error( "karte_t::step()", "delta_t (%li) out of bounds!", delta_t );
+			dbg->error( "karte_t::step()", "delta_t (%u) out of bounds!", delta_t );
 			last_step_ticks = ticks;
 			next_step_time = time+10;
 			return;
@@ -4253,7 +4256,7 @@ void karte_t::step()
 	if(  env_t::server  &&  last_clients!=socket_list_t::get_playing_clients()  ) {
 		if(  env_t::server_announce  ) {
 			// inform the master server
-			announce_server( 1 );
+			announce_server( karte_t::SERVER_ANNOUNCE_HEARTBEAT );
 		}
 
 		// check if player has left and send message
@@ -4569,7 +4572,6 @@ uint8 karte_t::recalc_natural_slope( const koord k, sint8 &new_height ) const
 		const sint16 d4 = min( corner_height[3] - new_height, max_hdiff );
 		return encode_corners(d1, d2, d3, d4);
 	}
-	return 0;
 }
 
 
@@ -4618,7 +4620,8 @@ bool karte_t::square_is_free(koord k, sint16 w, sint16 h, int *last_y, climate_b
 	}
 
 	grund_t *gr = lookup_kartenboden(k);
-	const sint16 platz_h = gr->get_grund_hang() ? max_hgt(k) : gr->get_hoehe(); // remember the max height of the first tile
+	const sint16 platz_base_h = gr->get_hoehe(); // remember the base height of the first tile
+	const sint16 platz_max_h = gr->get_hoehe() + slope_t::max_diff( gr->get_grund_hang() ); // remember the max height of the first tile
 
 	koord k_check;
 	for(k_check.y=k.y+h-1; k_check.y>=k.y; k_check.y--) {
@@ -4640,7 +4643,7 @@ bool karte_t::square_is_free(koord k, sint16 w, sint16 h, int *last_y, climate_b
 					test_climate = water_climate;
 				}
 			}
-			if(  platz_h != max_height  ||  !gr->ist_natur()  ||  gr->kann_alle_obj_entfernen(NULL) != NULL  ||
+			if( (platz_max_h != max_height  &&  platz_base_h != gr->get_hoehe())  ||  !gr->ist_natur()  ||  gr->kann_alle_obj_entfernen(NULL) != NULL  ||
 			     (cl & (1 << test_climate)) == 0  ||  ( slope && (lookup( gr->get_pos()+koord3d(0,0,1) ) ||
 			     (slope_t::max_diff(slope)==2 && lookup( gr->get_pos()+koord3d(0,0,2) )) ))  ) {
 				if(  last_y  ) {
@@ -4701,7 +4704,8 @@ bool karte_t::play_sound_area_clipped(koord const k, uint16 const idx, sound_typ
 
 void karte_t::save(const char *filename, bool autosave, const char *version_str, bool silent )
 {
-DBG_MESSAGE("karte_t::save()", "saving game to '%s'", filename);
+	dbg->message("karte_t::save", "%s game to '%s', version=%s, ticks=%u", autosave ? "Auto-saving" : "Saving", filename, version_str, ticks);
+
 	loadsave_t  file;
 	std::string savename = filename;
 	savename[savename.length()-1] = '_';
@@ -4712,14 +4716,14 @@ DBG_MESSAGE("karte_t::save()", "saving game to '%s'", filename);
 
 	if(  file.wr_open( savename.c_str(), mode, save_level, env_t::objfilename.c_str(), version_str ) != loadsave_t::FILE_STATUS_OK  ) {
 		create_win(new news_img("Kann Spielstand\nnicht speichern.\n"), w_info, magic_none);
-		dbg->error("karte_t::save()","cannot open file for writing! check permissions!");
+		dbg->error("karte_t::save", "Cannot open file '%s' for writing! Check permissions!", savename.c_str());
 	}
 	else {
 		save(&file,silent);
-		const char *success = file.close();
-		if(success) {
+		const char *save_err = file.close();
+		if(save_err) {
 			static char err_str[512];
-			sprintf( err_str, translator::translate("Error during saving:\n%s"), success );
+			sprintf( err_str, translator::translate("Error during saving:\n%s"), save_err );
 			create_win( new news_img(err_str), w_time_delete, magic_none);
 		}
 		else {
@@ -4759,7 +4763,7 @@ DBG_MESSAGE("karte_t::save(loadsave_t *file)", "start");
 			needs_redraw = true;
 		}
 		if(  nosave  ) {
-			dbg->error( "karte_t::save()","Map cannot be saved in any rotation!" );
+			dbg->error( "karte_t::save()", "Map cannot be saved in any rotation!" );
 			create_win( new news_img("Map may be not saveable in any rotation!"), w_info, magic_none);
 			// still broken, but we try anyway to save it ...
 		}
@@ -4781,6 +4785,27 @@ DBG_MESSAGE("karte_t::save(loadsave_t *file)", "start");
 	file->set_buffered(true);
 
 	rdwr_gamestate(file, ls);
+
+	for(int i=0; i<MAX_PLAYER_COUNT; i++) {
+		// **** REMOVE IF SOON! *********
+		if(file->is_version_less(101, 0)) {
+			if(  i<8  ) {
+				if(  players[i]  ) {
+					players[i]->rdwr(file);
+				}
+				else {
+					// simulate old ones ...
+					player_t *player = new player_t( i );
+					player->rdwr(file);
+					delete player;
+				}
+			}
+		}
+		else if(  players[i]  ) {
+			players[i]->rdwr(file);
+		}
+	}
+DBG_MESSAGE("karte_t::rdwr_gamestate()", "saved players");
 
 	// saving messages
 	if(  file->is_version_atleast(102, 5)  ) {
@@ -4820,9 +4845,12 @@ DBG_MESSAGE("karte_t::save(loadsave_t *file)", "motd filename %s", env_t::server
 		if(  FILE *fmotd = dr_fopen( env_t::server_motd_filename.c_str(), "r" )  ) {
 			struct stat st;
 			stat( env_t::server_motd_filename.c_str(), &st );
+
 			sint32 len = min( 32760, st.st_size+1 );
 			char *motd = (char *)malloc( len );
-			fread( motd, len-1, 1, fmotd );
+			if (fread( motd, len-1, 1, fmotd ) != 1) {
+				len = 1;
+			}
 			fclose( fmotd );
 			motd[len-1] = 0;
 			file->rdwr_str( motd, len );
@@ -4867,7 +4895,7 @@ void karte_t::switch_server( bool start_server, bool port_forwarding )
 
 		if(  env_t::server  ) {
 			// take down server
-			announce_server(2);
+			announce_server(karte_t::SERVER_ANNOUNCE_GOODBYE);
 			remove_port_forwarding( env_t::server );
 		}
 		network_core_shutdown();
@@ -4892,7 +4920,7 @@ void karte_t::switch_server( bool start_server, bool port_forwarding )
 		}
 		else {
 			// now start a server with defaults
-			env_t::networkmode = network_init_server( env_t::server_port );
+			env_t::networkmode = network_init_server( env_t::server_port, env_t::listen );
 			if(  env_t::networkmode  ) {
 
 				// query IP and try to open ports on router
@@ -4943,7 +4971,7 @@ bool karte_t::load(const char *filename)
 	// clear hash table with missing paks (may cause some small memory loss though)
 	missing_pak_names.clear();
 
-	DBG_MESSAGE("karte_t::load", "loading game from '%s'", filename);
+	dbg->message("karte_t::load", "Loading game from '%s'", filename);
 
 	// reloading same game? Remember pos
 	const koord oldpos = settings.get_filename()[0]>0  &&  strncmp(filename,settings.get_filename(),strlen(settings.get_filename()))==0 ? viewport->get_world_position() : koord::invalid;
@@ -4979,7 +5007,7 @@ bool karte_t::load(const char *filename)
 				sprintf( fn, "server%d-network.sve", env_t::server );
 				if(  strcmp(filename, fn) != 0  ) {
 					// stay in networkmode, but disconnect clients
-					dbg->warning("karte_t::load","disconnecting all clients");
+					dbg->warning("karte_t::load", "Disconnecting all clients");
 				}
 				else {
 					// read password hashes from separate file
@@ -5022,6 +5050,7 @@ bool karte_t::load(const char *filename)
 	else {
 DBG_MESSAGE("karte_t::load()","Savegame version is %u", file.get_version_int());
 
+		file.set_buffered(true);
 		load(&file);
 
 		if(  env_t::networkmode  ) {
@@ -5221,12 +5250,19 @@ void karte_t::load(loadsave_t *file)
 	tile_counter = 0;
 	simloops = 60;
 
-	file->set_buffered(true);
-
-	// jetzt geht das laden los
-	dbg->warning("karte_t::load", "Fileversion: %u", file->get_version_int());
+	// jetzt geht das Laden los
+	dbg->message("karte_t::load", "File version: %u", file->get_version_int());
 
 	rdwr_gamestate(file, &ls);
+
+	// now the player can be loaded
+	for(int i=0; i<MAX_PLAYER_COUNT; i++) {
+		if(  players[i]  ) {
+			players[i]->rdwr(file);
+		}
+		ls.set_progress( (get_size().y*3)/2+128+8*i );
+	}
+	DBG_MESSAGE("karte_t::rdwr_gamestate()", "players loaded");
 
 	// loading messages
 	if(  file->is_version_atleast(102, 5)  ) {
@@ -5567,6 +5603,12 @@ void karte_t::rdwr_gamestate(loadsave_t *file, loadingscreen_t *ls)
 		if(file->is_version_less(86, 6)) {
 			last_year += env_t::default_settings.get_starting_year();
 		}
+
+		if (last_year+1 >= INT32_MAX/12) {
+			// prevent overflow
+			dbg->fatal("karte_t::rdwr_gamestate", "Year out of range (%d >= %d)", last_year+1, INT_MAX/12);
+		}
+
 		// old game might have wrong month
 		last_month %= 12;
 		// set the current month count
@@ -5604,8 +5646,14 @@ void karte_t::rdwr_gamestate(loadsave_t *file, loadingscreen_t *ls)
 			}
 		}
 		// so far, player 1 will be active (may change in future)
-		active_player = players[0];
-		active_player_nr = 0;
+		active_player = players[HUMAN_PLAYER_NR];
+		active_player_nr = HUMAN_PLAYER_NR;
+	}
+
+	// rdwr tree ID mapping to restore tree IDs
+	if (file->is_version_atleast(122, 2)) {
+		DBG_MESSAGE("karte_t::rdwr_gamestate()", "rdwr tree IDs");
+		tree_builder_t::rdwr_tree_ids(file);
 	}
 
 	// rdwr static states
@@ -5921,40 +5969,6 @@ void karte_t::rdwr_gamestate(loadsave_t *file, loadingscreen_t *ls)
 			INT_CHECK("saving");
 		}
 		DBG_MESSAGE("karte_t::rdwr_gamestate()", "saved %i convois",convoi_array.get_count());
-	}
-
-	// rdwr players
-	if (file->is_loading()) {
-		// now the player can be loaded
-		for(int i=0; i<MAX_PLAYER_COUNT; i++) {
-			if(  players[i]  ) {
-				players[i]->rdwr(file);
-			}
-			ls->set_progress( (get_size().y*3)/2+128+8*i );
-		}
-	DBG_MESSAGE("karte_t::rdwr_gamestate()", "players loaded");
-	}
-	else { // saving
-		for(int i=0; i<MAX_PLAYER_COUNT; i++) {
-	// **** REMOVE IF SOON! *********
-			if(file->is_version_less(101, 0)) {
-				if(  i<8  ) {
-					if(  players[i]  ) {
-						players[i]->rdwr(file);
-					}
-					else {
-						// simulate old ones ...
-						player_t *player = new player_t( i );
-						player->rdwr(file);
-						delete player;
-					}
-				}
-			}
-			else if(  players[i]  ) {
-				players[i]->rdwr(file);
-			}
-		}
-	DBG_MESSAGE("karte_t::rdwr_gamestate()", "saved players");
 	}
 }
 
@@ -6436,6 +6450,26 @@ void karte_t::assign_climate_map_region( sint16 xtop, sint16 ytop, sint16 xbotto
 }
 
 
+
+void karte_t::get_height_slope_from_grid(koord k, sint8 &hgt, uint8 &slope)
+{
+	if(  (k.x | k.y | (cached_grid_size.x - k.x-1) | (cached_grid_size.y - k.y-1)) >= 0  ) {
+		// inside map, so without further checks
+		const sint8 h_n = lookup_hgt_nocheck(k.x, k.y);
+		const sint8 h_w = lookup_hgt_nocheck(k.x, k.y+1);
+		const sint8 h_s = lookup_hgt_nocheck(k.x+1, k.y+1);
+		const sint8 h_e = lookup_hgt_nocheck(k.x+1, k.y);
+
+		hgt = min(min(h_n, h_e), min(h_s, h_w));
+
+		slope  = slope_t::northwest * min(h_n - hgt, 2);
+		slope |= slope_t::northeast * min(h_e - hgt, 2);
+		slope |= slope_t::southeast * min(h_s - hgt, 2);
+		slope |= slope_t::southwest * min(h_w - hgt, 2);
+	}
+}
+
+
 // fills array with neighbour heights
 void karte_t::get_neighbour_heights(const koord k, sint8 neighbour_height[8][4]) const
 {
@@ -6682,7 +6716,7 @@ void karte_t::reset_timer()
 	}
 	else if(step_mode==FIX_RATIO) {
 		last_frame_idx = 0;
-		fix_ratio_frame_time = 1000 / clamp(settings.get_frames_per_second(), 5u, 100u);
+		fix_ratio_frame_time = 1000 / clamp(settings.get_frames_per_second(), env_t::min_fps, env_t::max_fps);
 		next_step_time = last_tick_sync + fix_ratio_frame_time;
 		set_frame_time( fix_ratio_frame_time );
 		intr_disable();
@@ -6846,19 +6880,21 @@ const char *karte_t::init_new_player(uint8 new_player_in, uint8 type)
 
 void karte_t::remove_player(uint8 player_nr)
 {
-	if ( player_nr!=1  &&  player_nr<PLAYER_UNOWNED  &&  players[player_nr]!=NULL) {
+	if ( player_nr!=PUBLIC_PLAYER_NR  &&  player_nr<PLAYER_UNOWNED  &&  players[player_nr]!=NULL) {
 		players[player_nr]->ai_bankrupt();
 		delete players[player_nr];
-		players[player_nr] = 0;
+		players[player_nr] = NULL;
+
 		nwc_chg_player_t::company_removed(player_nr);
+
 		// if default human, create new instace of it (to avoid crashes)
-		if(  player_nr == 0  ) {
-			players[0] = new player_t( 0 );
+		if(  player_nr == HUMAN_PLAYER_NR  ) {
+			players[0] = new player_t( HUMAN_PLAYER_NR );
 		}
 		// if currently still active => reset to default human
 		if(  player_nr == active_player_nr  ) {
-			active_player_nr = 0;
-			active_player = players[0];
+			active_player_nr = HUMAN_PLAYER_NR;
+			active_player = players[HUMAN_PLAYER_NR];
 			if(  !env_t::server  ) {
 				create_win( display_get_width()/2-128, 40, new news_img("Bankrott:\n\nDu bist bankrott.\n"), w_info, magic_none);
 			}
@@ -6879,10 +6915,10 @@ void karte_t::switch_active_player(uint8 new_player, bool silent)
 	koord3d old_zeiger_pos = zeiger->get_pos();
 
 	// no cheating allowed?
-	if (!settings.get_allow_player_change() && players[1]->is_locked()) {
-		active_player_nr = 0;
-		active_player = players[0];
-		if(new_player!=0) {
+	if (!settings.get_allow_player_change() && get_public_player()->is_locked()) {
+		active_player_nr = HUMAN_PLAYER_NR;
+		active_player = players[HUMAN_PLAYER_NR];
+		if(new_player!=HUMAN_PLAYER_NR) {
 			create_win( new news_img("On this map, you are not\nallowed to change player!\n"), w_time_delete, magic_none);
 		}
 	}
@@ -6918,7 +6954,66 @@ void karte_t::switch_active_player(uint8 new_player, bool silent)
 void karte_t::stop(bool exit_game)
 {
 	finish_loop = true;
-	env_t::quit_simutrans = exit_game;
+	if (exit_game) {
+		env_t::quit_simutrans = true;
+
+		DBG_DEBUG("ev=SYSTEM_QUIT", "env_t::reload_and_save_on_quit=%d", env_t::reload_and_save_on_quit);
+
+		// we may be requested to save the game before exit
+		if (env_t::server && env_t::server_save_game_on_quit) {
+
+			// to ensure only one attempt is made
+			env_t::server_save_game_on_quit = false;
+
+			// following code quite similar to nwc_sync_t::do_coomand
+			dr_chdir(env_t::user_dir);
+
+			// first save password hashes
+			char fn[256];
+			sprintf(fn, "server%d-pwdhash.sve", env_t::server);
+			loadsave_t file;
+			if (file.wr_open(fn, loadsave_t::zipped, 1, "hashes", SAVEGAME_VER_NR) == loadsave_t::FILE_STATUS_OK) {
+				world->rdwr_player_password_hashes(&file);
+				file.close();
+			}
+
+			// remove passwords before transfer on the server and set default client mask
+			// they will be restored in karte_t::laden
+			uint16 unlocked_players = 0;
+			for (int i = 0; i < PLAYER_UNOWNED; i++) {
+				player_t* player = world->get_player(i);
+				if (player == NULL || player->access_password_hash().empty()) {
+					unlocked_players |= (1 << i);
+				}
+				else {
+					player->access_password_hash().clear();
+				}
+			}
+
+			// save game
+			sprintf(fn, "server%d-restore.sve", env_t::server);
+			bool old_restore_UI = env_t::restore_UI;
+			env_t::restore_UI = true;
+			world->save(fn, false, SAVEGAME_VER_NR, false);
+			env_t::restore_UI = old_restore_UI;
+		}
+		else if (env_t::reload_and_save_on_quit && !env_t::networkmode) {
+			// save current game, if not online
+			bool old_restore_UI = env_t::restore_UI;
+			env_t::restore_UI = true;
+
+			// construct from pak name an autosave if requested
+			std::string pak_name("autosave-");
+			pak_name.append(env_t::objfilename);
+			pak_name.erase(pak_name.length() - 1);
+			pak_name.append(".sve");
+
+			dr_chdir(env_t::user_dir);
+			world->save(pak_name.c_str(), true, SAVEGAME_VER_NR, false);
+			env_t::restore_UI = old_restore_UI;
+		}
+		destroy_all_win(true);
+	}
 }
 
 
@@ -7063,8 +7158,8 @@ void karte_t::process_network_commands(sint32 *ms_difference)
 				if(  time_to_next > -frame_timediff  ) {
 					// already waiting longer than how far we're ahead, so set wait time shorter to the time ahead.
 					next_step_time = (sint64)timems - frame_timediff;
-			}
-			else if(  nwcid == NWC_CHECK  ) {
+				}
+				else if(  nwcid == NWC_CHECK  ) {
 					// gentle slowing down
 					*ms_difference = timediff;
 				}
@@ -7099,10 +7194,10 @@ void karte_t::process_network_commands(sint32 *ms_difference)
 				// out of sync => drop client (but we can only compare if nwt->last_sync_step is not too old)
 				else if(  is_checklist_available(nwt->last_sync_step)  &&  LCHKLST(nwt->last_sync_step)!=nwt->last_checklist  ) {
 					// lost synchronisation -> server kicks client out actively
-					char buf[256];
-					const int offset = LCHKLST(nwt->last_sync_step).print(buf, "server");
-					nwt->last_checklist.print(buf + offset, "initiator");
-					dbg->warning("karte_t::process_network_commands", "kicking client due to checklist mismatch : sync_step=%u %s", nwt->last_sync_step, buf);
+					cbuffer_t buf;
+					LCHKLST(nwt->last_sync_step).print(buf, "server");
+					nwt->last_checklist.print(buf, "initiator");
+					dbg->warning("karte_t::process_network_commands", "kicking client due to checklist mismatch : sync_step=%u %s", nwt->last_sync_step, buf.get_str());
 					socket_list_t::remove_client( nwc->get_sender() );
 					delete nwc;
 					nwc = NULL;
@@ -7142,13 +7237,13 @@ void karte_t::do_network_world_command(network_world_command_t *nwc)
 	// want to execute something in the past?
 	if (nwc->get_sync_step() < sync_steps) {
 		if (!nwc->ignore_old_events()) {
-			dbg->warning("karte_t:::do_network_world_command", "wanted to do_command(%d) in the past", nwc->get_id());
+			dbg->warning("karte_t:::do_network_world_command", "wanted to do_command(%s) in the past", nwc->get_name());
 			network_disconnect();
 		}
 	}
 	// check map counter
 	else if (nwc->get_map_counter() != map_counter) {
-		dbg->warning("karte_t:::do_network_world_command", "wanted to do_command(%d) from another world", nwc->get_id());
+		dbg->warning("karte_t:::do_network_world_command", "wanted to do_command(%s) from another world", nwc->get_name());
 	}
 	// check random counter?
 	else if(  nwc->get_id()==NWC_CHECK  ) {
@@ -7156,13 +7251,16 @@ void karte_t::do_network_world_command(network_world_command_t *nwc)
 		// this was the random number at the previous sync step on the server
 		const checklist_t &server_checklist = nwcheck->server_checklist;
 		const uint32 server_sync_step = nwcheck->server_sync_step;
-		char buf[256];
-		const int offset = server_checklist.print(buf, "server");
-		LCHKLST(server_sync_step).print(buf + offset, "client");
-		dbg->warning("karte_t:::do_network_world_command", "sync_step=%u  %s", server_sync_step, buf);
+		cbuffer_t buf;
+		server_checklist.print(buf, "server");
+		LCHKLST(server_sync_step).print(buf, "client");
+		dbg->warning("karte_t:::do_network_world_command", "sync_step=%u  %s", server_sync_step, buf.get_str());
+
 		if(  LCHKLST(server_sync_step)!=server_checklist  ) {
-			dbg->warning("karte_t:::do_network_world_command", "disconnecting due to checklist mismatch" );
 			network_disconnect();
+			// output warning / throw fatal error depending on heavy mode setting
+			void (log_t::*outfn)(const char*, const char*, ...) = (env_t::network_heavy_mode == 2 ? &log_t::fatal : &log_t::warning);
+			(dbg->*outfn)("karte_t:::do_network_world_command", "Disconnected due to checklist mismatch" );
 		}
 	}
 	else {
@@ -7170,10 +7268,10 @@ void karte_t::do_network_world_command(network_world_command_t *nwc)
 			nwc_tool_t *nwt = dynamic_cast<nwc_tool_t *>(nwc);
 			if(  is_checklist_available(nwt->last_sync_step)  &&  LCHKLST(nwt->last_sync_step)!=nwt->last_checklist  ) {
 				// lost synchronisation ...
-				char buf[256];
-				const int offset = nwt->last_checklist.print(buf, "server");
-				LCHKLST(nwt->last_sync_step).print(buf + offset, "executor");
-				dbg->warning("karte_t:::do_network_world_command", "skipping command due to checklist mismatch : sync_step=%u %s", nwt->last_sync_step, buf);
+				cbuffer_t buf;
+				nwt->last_checklist.print(buf, "server");
+				LCHKLST(nwt->last_sync_step).print(buf, "executor");
+				dbg->warning("karte_t:::do_network_world_command", "skipping command due to checklist mismatch : sync_step=%u %s", nwt->last_sync_step, buf.get_str());
 				if(  !env_t::server  ) {
 					network_disconnect();
 				}
@@ -7220,9 +7318,23 @@ sint16 karte_t::get_sound_id(grund_t *gr)
 }
 
 
+static void heavy_rotate_saves(const char *prefix, uint32 sync_steps, uint32 num_to_keep)
+{
+	dr_mkdir( SAVE_PATH_X "heavy");
+
+	cbuffer_t name;
+	name.printf(SAVE_PATH_X "heavy/heavy-%s-%04d.sve", prefix, sync_steps);
+	world()->save(name, false, SERVER_SAVEGAME_VER_NR, true);
+
+	if (sync_steps >= num_to_keep) {
+		name.printf(SAVE_PATH_X "heavy/heavy-%s-%04d.sve", prefix, sync_steps - num_to_keep);
+		dr_remove(name);
+	}
+}
+
+
 bool karte_t::interactive(uint32 quit_month)
 {
-
 	finish_loop = false;
 	sync_steps = 0;
 	sync_steps_barrier = sync_steps;
@@ -7258,7 +7370,7 @@ bool karte_t::interactive(uint32 quit_month)
 
 		// Announce server startup to the listing server
 		if(  env_t::server_announce  ) {
-			announce_server( 0 );
+			announce_server( karte_t::SERVER_ANNOUNCE_HELLO );
 		}
 	}
 
@@ -7300,12 +7412,7 @@ bool karte_t::interactive(uint32 quit_month)
 			INT_CHECK( "karte_t::interactive()" );
 			const sint32 wait_time = (sint32)next_step_time - (sint32)dr_time();
 			if(wait_time>0) {
-				if(  wait_time < 4  ) {
-					dr_sleep( wait_time );
-				}
-				else {
-					dr_sleep( 3 );
-				}
+				dr_sleep(min(wait_time, 3));
 				INT_CHECK( "karte_t::interactive()" );
 			}
 			DBG_DEBUG4("karte_t::interactive", "end of sleep");
@@ -7363,16 +7470,35 @@ bool karte_t::interactive(uint32 quit_month)
 						network_frame_count = 0;
 					}
 					sync_steps = steps * settings.get_frames_per_step() + network_frame_count;
-					LCHKLST(sync_steps) = checklist_t(get_random_seed(), halthandle_t::get_next_check(), linehandle_t::get_next_check(), convoihandle_t::get_next_check());
+
+					switch(env_t::network_heavy_mode) {
+						case 0:
+						default:
+							LCHKLST(sync_steps) = checklist_t(get_random_seed(), halthandle_t::get_next_check(), linehandle_t::get_next_check(), convoihandle_t::get_next_check());
+							break;
+						case 2:
+							heavy_rotate_saves(env_t::server ? "server" : "client", sync_steps, 10);
+							// fall-through
+						case 1:
+							LCHKLST(sync_steps) = checklist_t(get_gamestate_hash());
+					}
 					// some server side tasks
 					if(  env_t::networkmode  &&  env_t::server  ) {
 						// broadcast sync info regularly and when lagged
 						const sint64 timelag = (sint32)dr_time() - (sint32)next_step_time;
 						if(  (network_frame_count == 0  &&  timelag > fix_ratio_frame_time * settings.get_server_frames_ahead() / 2)  ||  (sync_steps % env_t::server_sync_steps_between_checks) == 0  ) {
-							if(  timelag > fix_ratio_frame_time * settings.get_frames_per_step()  ) {
-								// log when server is lagged more than one step
-								dbg->warning("karte_t::interactive", "server lagging by %lli", timelag );
+							const sint64 time_per_step = fix_ratio_frame_time * settings.get_frames_per_step();
+							static sint64 previous_lag = 0;
+
+							if(  timelag > 1*time_per_step  ) {
+								// log when server is lagged more than one step, but only if it gets worse (don't spam log)
+
+								if (timelag/time_per_step > previous_lag/time_per_step) {
+									dbg->warning("karte_t::interactive", "Server lagging by %lli ms (%d steps)", timelag, (sint32)(timelag/time_per_step) );
+								}
 							}
+
+							previous_lag = timelag;
 
 							nwc_check_t* nwc = new nwc_check_t(sync_steps + 1, map_counter, LCHKLST(sync_steps), sync_steps);
 							network_send_all(nwc, true);
@@ -7403,7 +7529,7 @@ bool karte_t::interactive(uint32 quit_month)
 		// Interval-based server announcements
 		if (  env_t::server  &&  env_t::server_announce  &&  env_t::server_announce_interval > 0  &&
 			dr_time() - server_last_announce_time >= (uint32)env_t::server_announce_interval * 1000  ) {
-			announce_server( 1 );
+			announce_server( karte_t::SERVER_ANNOUNCE_HEARTBEAT );
 		}
 
 		DBG_DEBUG4("karte_t::interactive", "point of loop return");
@@ -7415,7 +7541,7 @@ bool karte_t::interactive(uint32 quit_month)
 
 	// On quit announce server as being offline
 	if(  env_t::server  &&  env_t::server_announce  ) {
-		announce_server( 2 );
+		announce_server( karte_t::SERVER_ANNOUNCE_GOODBYE );
 	}
 
 	intr_enable();
@@ -7430,30 +7556,36 @@ bool karte_t::interactive(uint32 quit_month)
 // 0 - startup
 // 1 - interval
 // 2 - shutdown
-void karte_t::announce_server(int status)
+void karte_t::announce_server(server_announce_type_t status)
 {
-	DBG_DEBUG( "announce_server()", "status: %i",  status );
+	DBG_DEBUG( "announce_server()", "status: %i",  (int)status );
+
 	// Announce game info to server, format is:
 	// st=on&dns=server.com&port=13353&rev=1234&pak=pak128&name=some+name&time=3,1923&size=256,256&active=[0-16]&locked=[0-16]&clients=[0-16]&towns=15&citizens=3245&factories=33&convoys=56&stops=17
 	// (This is the data part of an HTTP POST)
 	if(  env_t::server  &&  env_t::server_announce  ) {
 		// in easy_server mode, we assume the IP may change frequently and thus query it before each announce
-		cbuffer_t buf, altbuf;
-		if(  env_t::easy_server  &&  status<2  &&  get_external_IP(buf,altbuf)  ) {
-			// ipdate IP just in case
-			if(  status == 1  &&  (env_t::server_dns.compare( buf )  ||  env_t::server_alt_dns.compare( altbuf ))  ) {
-				announce_server( 2 );
-				status = 0; // since starting with new IP
+		cbuffer_t ip_buf, altip_buf;
+
+		if(  env_t::easy_server  &&  status!=SERVER_ANNOUNCE_GOODBYE  &&  get_external_IP(ip_buf,altip_buf)  ) {
+			// update IP just in case
+			if(  status == SERVER_ANNOUNCE_HEARTBEAT  &&  (env_t::server_dns.compare( ip_buf )!=0  ||  env_t::server_alt_dns.compare( altip_buf )!=0)  ) {
+				announce_server( SERVER_ANNOUNCE_GOODBYE );
+
+				status = SERVER_ANNOUNCE_HELLO; // since starting with new IP
+
 				// if we had uPnP, we may need to drill another hole in the firewall again; the delay is no problem, since all clients will be lost anyway
 				char IP[256], altIP[256];
 				prepare_for_server( IP, altIP, env_t::server_port );
 			}
+
 			// now update DNS info
-			env_t::server_dns = (const char *)buf;
-			env_t::server_alt_dns = (const char *)altbuf;
+			env_t::server_dns = (const char *)ip_buf;
+			env_t::server_alt_dns = (const char *)altip_buf;
 		}
+
 		// Always send dns and port as these are used as the unique identifier for the server
-		buf.clear();
+		cbuffer_t buf;
 		buf.append( "&dns=" );
 		encode_URI( buf, env_t::server_dns.c_str() );
 		buf.append( "&alt_dns=" );
@@ -7461,22 +7593,25 @@ void karte_t::announce_server(int status)
 		buf.printf( "&port=%u", env_t::server );
 		// Always send announce interval to allow listing server to predict next announce
 		buf.printf( "&aiv=%u", env_t::server_announce_interval );
+
 		// Always send status, either online or offline
-		if (  status == 0  ||  status == 1  ) {
+		if (  status == SERVER_ANNOUNCE_HELLO  ||  status == SERVER_ANNOUNCE_HEARTBEAT  ) {
 			buf.append( "&st=1" );
 		}
 		else {
 			buf.append( "&st=0" );
 		}
+
 #ifndef REVISION
 #	define REVISION 0
 #endif
 		// Simple revision used for matching (integer)
-		buf.printf( "&rev=%d", atol( QUOTEME(REVISION) ) );
+		buf.printf( "&rev=%d", (int)atol( QUOTEME(REVISION) ));
 		// Complex version string used for display
 		buf.printf( "&ver=Simutrans %s (r%s) built %s", QUOTEME(VERSION_NUMBER), QUOTEME(REVISION), QUOTEME(VERSION_DATE) );
 		// Pakset version
 		buf.append( "&pak=" );
+
 		// Announce pak set, ideally get this from the copyright field of ground.Outside.pak
 		char const* const copyright = ground_desc_t::outside->get_copyright();
 		if (copyright && STRICMP("none", copyright) != 0) {
@@ -7489,6 +7624,7 @@ void karte_t::announce_server(int status)
 			pak_name.erase( pak_name.length() - 1 );
 			encode_URI( buf, pak_name.c_str() );
 		}
+
 		// TODO - change this to be the start date of the current map
 		buf.printf( "&start=%u,%u", settings.get_starting_month() + 1, settings.get_starting_year() );
 		// Add server name for listing
@@ -7517,6 +7653,7 @@ void karte_t::announce_server(int status)
 				}
 			}
 		}
+
 		buf.printf( "&time=%u,%u",   (get_current_month() % 12) + 1, get_current_month() / 12 );
 		buf.printf( "&size=%u,%u",   get_size().x, get_size().y );
 		buf.printf( "&active=%u",    active );
@@ -7589,5 +7726,15 @@ const vector_tpl<const goods_desc_t*> &karte_t::get_goods_list()
 
 player_t *karte_t::get_public_player() const
 {
-	return get_player(1);
+	return get_player(PUBLIC_PLAYER_NR);
+}
+
+
+uint32 karte_t::get_gamestate_hash()
+{
+	adler32_stream_t *stream = new adler32_stream_t;
+	stream_loadsave_t ls(stream);
+
+	rdwr_gamestate(&ls, NULL);
+	return stream->get_hash();
 }

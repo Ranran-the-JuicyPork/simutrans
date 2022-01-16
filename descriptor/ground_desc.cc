@@ -22,9 +22,11 @@ const int totalslopes = 81;
 * maybe they should be put in their own module, even though they are only used here ...
 */
 
+#if COLOUR_DEPTH != 0
 #define red_comp(pix)    (((pix)>>10)&0x001f)
 #define green_comp(pix)   (((pix)>>5)&0x001f)
 #define blue_comp(pix)         ((pix)&0x001f)
+#endif
 
 
 /* combines a texture and a lightmap
@@ -371,7 +373,7 @@ static special_obj_tpl<ground_desc_t> const grounds[] = {
 // the water and seven climates
 static const char* const climate_names[MAX_CLIMATES] =
 {
-	"Water", "desert", "tropic", "mediterran", "temperate", "tundra", "rocky", "arctic"
+	"sea", "desert", "tropic", "mediterran", "temperate", "tundra", "rocky", "arctic"
 };
 
 // from this number on there will be all ground images

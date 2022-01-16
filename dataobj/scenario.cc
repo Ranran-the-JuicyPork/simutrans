@@ -541,6 +541,21 @@ const char* scenario_t::is_convoy_allowed(const player_t* player, convoihandle_t
 
 }
 
+const char* scenario_t::jump_to_link_executed(koord3d pos)
+{
+	if (env_t::server) {
+		// networkgame: allowed
+		return NULL;
+	}
+	// call script
+	if (what_scenario == SCRIPTED) {
+		static plainstring msg;
+		const char *err = script->call_function(script_vm_t::FORCE, "jump_to_link_executed", msg, pos);
+
+		return err == NULL ? msg.c_str() : NULL;
+	}
+	return NULL;
+}
 
 const char* scenario_t::get_error_text()
 {
@@ -717,9 +732,10 @@ plainstring scenario_t::load_language_file(const char* filename)
 		if(len>0) {
 			char* const buf = MALLOCN(char, len + 1);
 			fseek(file,0,SEEK_SET);
-			fread(buf, 1, len, file);
-			buf[len] = '\0';
-			text = buf;
+			if (fread(buf, 1, len, file) == (size_t)len) {
+				buf[len] = '\0';
+				text = buf;
+			}
 			free(buf);
 		}
 		fclose(file);

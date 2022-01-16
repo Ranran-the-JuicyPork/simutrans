@@ -83,6 +83,7 @@ scr_size gui_theme_t::gui_min_scrollbar_size;
 scr_size gui_theme_t::gui_label_size;
 scr_size gui_theme_t::gui_edit_size;
 scr_size gui_theme_t::gui_gadget_size;
+scr_size gui_theme_t::gui_dragger_size;
 scr_size gui_theme_t::gui_indicator_size;
 scr_coord_val gui_theme_t::gui_waitingbar_width;
 
@@ -261,7 +262,7 @@ void gui_theme_t::init_gui_from_images()
 			button_tiles[i][j%3][j/3] = skinverwaltung_t::button->get_image_id( i*9+j );
 		}
 	}
-	image_id has_second_mask;
+	image_id has_second_mask = 0xFFFF;
 	for(  int i=0;  i<2;  i++  ) {
 		has_second_mask = 0xFFFF;
 		for(  int j=0;  j<9;  j++  ) {
@@ -363,7 +364,10 @@ void gui_theme_t::init_gui_from_images()
 	}
 
 	// gadgets
-	init_size_from_image( skinverwaltung_t::gadget->get_image( SKIN_GADGET_CLOSE ), gui_gadget_size );
+	gui_dragger_size = gui_scrollbar_size;
+	if (skinverwaltung_t::gadget) {
+		init_size_from_image( skinverwaltung_t::gadget->get_image( SKIN_GADGET_CLOSE ), gui_gadget_size );
+	}
 }
 
 
@@ -464,23 +468,28 @@ bool gui_theme_t::themes_init(const char *file_name, bool init_fonts, bool init_
 	gui_theme_t::gui_scrollbar_size.w = max( gui_min_scrollbar_size.w, (uint32)contents.get_int("gui_scrollbar_width",  gui_theme_t::gui_scrollbar_size.w ) );
 	gui_theme_t::gui_scrollbar_size.h = max( gui_min_scrollbar_size.h, (uint32)contents.get_int("gui_scrollbar_height", gui_theme_t::gui_scrollbar_size.h ) );
 
+	// dragger size must be as large as scrollbar size
+	if (skinverwaltung_t::gadget) {
+		init_size_from_image( skinverwaltung_t::gadget->get_image( SKIN_WINDOW_RESIZE), gui_dragger_size );
+		gui_dragger_size.clip_lefttop(scr_coord(gui_scrollbar_size.w, gui_scrollbar_size.h));
+	}
+
 	// in practice, posbutton min height better is LINESPACE
 	gui_theme_t::gui_pos_button_size.w = (uint32)contents.get_int("gui_posbutton_width",  gui_theme_t::gui_pos_button_size.w );
 	gui_theme_t::gui_pos_button_size.h = (uint32)contents.get_int("gui_posbutton_height", gui_theme_t::gui_pos_button_size.h );
 
 	// read ../dataobj/tabfile.h for clarification of this area
-	int *color_button_text_offsets = contents.get_ints("gui_color_button_text_offset");
-	int *button_text_offsets = contents.get_ints("gui_button_text_offset");
-	if(  color_button_text_offsets[0] > 2  ) {
-		gui_theme_t::gui_color_button_text_offset = scr_size(color_button_text_offsets[1], color_button_text_offsets[2]);
-		gui_theme_t::gui_color_button_text_offset_right = scr_coord(color_button_text_offsets[3], 0);
+	vector_tpl<int> color_button_text_offsets = contents.get_ints("gui_color_button_text_offset");
+	if(  color_button_text_offsets.get_count() > 2  ) {
+		gui_theme_t::gui_color_button_text_offset = scr_size(color_button_text_offsets[0], color_button_text_offsets[1]);
+		gui_theme_t::gui_color_button_text_offset_right = scr_coord(color_button_text_offsets[2], 0);
 	}
-	if(  button_text_offsets[0] > 2  ) {
-		gui_theme_t::gui_button_text_offset = scr_size(button_text_offsets[1], button_text_offsets[2]);
-		gui_theme_t::gui_button_text_offset_right = scr_coord(button_text_offsets[3], 0);
+
+	vector_tpl<int> button_text_offsets = contents.get_ints("gui_button_text_offset");
+	if(  button_text_offsets.get_count() > 2  ) {
+		gui_theme_t::gui_button_text_offset = scr_size(button_text_offsets[0], button_text_offsets[1]);
+		gui_theme_t::gui_button_text_offset_right = scr_coord(button_text_offsets[2], 0);
 	}
-	delete [] color_button_text_offsets;
-	delete [] button_text_offsets;
 
 	// default iconsize (square for now)
 	env_t::iconsize.h = env_t::iconsize.w = contents.get_int("icon_width",env_t::iconsize.w );

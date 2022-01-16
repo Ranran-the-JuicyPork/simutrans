@@ -71,7 +71,7 @@ void script_vm_t::errorfunc(HSQUIRRELVM vm, const SQChar *s_, ...)
 	if (strcmp(s, "<error>")==0) {
 		// start of error message
 		buf.clear();
-		buf.printf("<st>An error occured within a script!</st><br>\n");
+		buf.printf("<st>An error occurred within a script!</st><br>\n");
 	}
 	else if (strcmp(s, "</error>")==0) {
 		// end of error message
@@ -120,7 +120,7 @@ script_vm_t::script_vm_t(const char* include_path_, const char* log_name)
 	// create thread, and put it into registry-table
 	sq_pushregistrytable(vm);
 	sq_pushstring(vm, "thread", -1);
-	thread = sq_newthread(vm, 100);
+	thread = sq_newthread(vm, 1024);
 	sq_newslot(vm, -3, false);
 	register_vm(thread);
 	// create queue array
@@ -494,7 +494,7 @@ void script_vm_t::intern_queue_call(HSQUIRRELVM job, int nparams, bool retvalue)
 		// add callback to queue
 		sq_pushstring(job, "queued_callbacks", -1);
 		sq_get(job, -3);
-		sq_newarray(job, 10);
+		sq_newarray(job, 0);
 		// stack: array, registry, queue, queued_callbacks, queued_callbacks[end]
 		sq_pushstring(job, "pending_callback", -1);
 		// delete pending_callback slot and push it
@@ -667,7 +667,7 @@ void script_vm_t::intern_make_pending_callback_active()
 	BEGIN_STACK_WATCH(vm);
 	sq_pushregistrytable(vm);
 	sq_pushstring(vm, "active_callbacks", -1);
-	sq_newarray(vm, 1);
+	sq_newarray(vm, 0);
 	sq_pushstring(vm, "pending_callback", -1);
 	if (SQ_SUCCEEDED( sq_deleteslot(vm, -4, true) ) ) {
 		// stack: registry, "..", array[], pending_callback

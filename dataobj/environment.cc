@@ -17,6 +17,8 @@
 void rdwr_win_settings(loadsave_t *file); // simwin
 
 sint16 env_t::menupos = MENU_TOP;
+sint16 env_t::fullscreen = WINDOWED;
+bool env_t::reselect_closes_tool = true;
 
 sint8 env_t::pak_tile_height_step = 16;
 sint8 env_t::pak_height_conversion_factor = 1;
@@ -58,6 +60,7 @@ std::string env_t::server_motd_filename;
 vector_tpl<std::string> env_t::listen;
 bool env_t::server_save_game_on_quit = false;
 bool env_t::reload_and_save_on_quit = true;
+uint8 env_t::network_heavy_mode = 0;
 
 sint32 env_t::server_frames_ahead = 4;
 sint32 env_t::additional_client_frames_behind = 4;
@@ -114,8 +117,10 @@ uint32 env_t::moving_object_probability;
 bool env_t::road_user_info;
 bool env_t::tree_info;
 bool env_t::ground_info;
+uint8 env_t::show_factory_storage_bar;
 bool env_t::townhall_info;
 bool env_t::single_info;
+bool env_t::single_line_gui;
 bool env_t::window_buttons_right;
 bool env_t::second_open_closes_win;
 bool env_t::remember_window_positions;
@@ -156,8 +161,13 @@ sint8 env_t::show_money_message;
 uint8 env_t::gui_player_color_dark = 1;
 uint8 env_t::gui_player_color_bright = 4;
 
+#ifndef __ANDROID__
 std::string env_t::fontname = FONT_PATH_X "prop.fnt";
 uint8 env_t::fontsize = 11;
+#else
+std::string env_t::fontname = FONT_PATH_X "Roboto-Regular.ttf";
+uint8 env_t::fontsize = 17;
+#endif
 
 uint32 env_t::front_window_text_color_rgb;
 PIXVAL env_t::front_window_text_color;
@@ -172,9 +182,13 @@ uint16 env_t::compass_screen_position;
 
 uint32 env_t::default_ai_construction_speed;
 
+
+#ifdef __ANDROID__
+// autoshow keyboard on textinput
+bool env_t::hide_keyboard = true;
+#else
 bool env_t::hide_keyboard = false;
-
-
+#endif
 
 // Define default settings.
 void env_t::init()
@@ -185,7 +199,7 @@ void env_t::init()
 	message_flags[2] = 0x0080;
 	message_flags[3] = 0;
 
-	night_shift = false;
+	night_shift = true;
 
 	hide_with_transparency = true;
 	hide_trees = false;
@@ -213,6 +227,7 @@ void env_t::init()
 	ground_info = false;
 	townhall_info = false;
 	single_info = true;
+	single_line_gui = false;
 
 	window_buttons_right = false;
 	window_frame_active = false;
@@ -228,14 +243,16 @@ void env_t::init()
 	savegame_version_str = SAVEGAME_VER_NR;
 
 	show_month = DATE_FMT_US;
+	show_factory_storage_bar = 0;
 
 	intercity_road_length = 200;
 
 	river_types = 0;
 
-
 	// autosave every x months (0=off)
 	autosave = 0;
+
+	reload_and_save_on_quit = true;
 
 	// default: make 25 frames per second (if possible) and 10 for faster fast forward
 	fps = 25;
@@ -294,7 +311,7 @@ void env_t::init()
 	// upper right
 	compass_map_position = ALIGN_RIGHT|ALIGN_TOP;
 	// lower right
-	compass_screen_position = 0, // disbale, other could be ALIGN_RIGHT|ALIGN_BOTTOM;
+	compass_screen_position = 0; // disbale, other could be ALIGN_RIGHT|ALIGN_BOTTOM;
 
 	// Listen on all addresses by default
 	listen.append_unique("::");
@@ -533,6 +550,7 @@ void env_t::rdwr(loadsave_t *file)
 		file->rdwr_byte( gui_player_color_dark );
 		file->rdwr_byte( gui_player_color_bright );
 	}
+
 	if( file->is_version_atleast( 122, 1 ) ) {
 		file->rdwr_bool( env_t::numpad_always_moves_map );
 
@@ -543,7 +561,14 @@ void env_t::rdwr(loadsave_t *file)
 		}
 
 		file->rdwr_short(env_t::menupos);
-		env_t::menupos & 3;
+		env_t::menupos &= 3;
+		file->rdwr_bool( reselect_closes_tool );
+
+		file->rdwr_bool( single_line_gui );
+
+		file->rdwr_byte( show_factory_storage_bar );
+
+		file->rdwr_short( fullscreen );
 	}
 
 	// server settings are not saved, since they are server specific

@@ -8,6 +8,7 @@
 
 #include "settings.h"
 #include "environment.h"
+#include "../pathes.h"
 #include "../simconst.h"
 #include "../simtypes.h"
 #include "../simdebug.h"
@@ -293,13 +294,13 @@ settings_t::settings_t() :
 
 	used_vehicle_reduction = 0;
 
-	departures_on_time = false;
-
 	// some network thing to keep client in sync
 	random_counter = 0; // will be set when actually saving
 	frames_per_second = 20;
 	frames_per_step = 4;
 	server_frames_ahead = 4;
+
+	stop_halt_as_scheduled = false;
 }
 
 
@@ -756,7 +757,7 @@ void settings_t::rdwr(loadsave_t *file)
 			}
 
 			if(  !env_t::networkmode  ||  env_t::server  ) {
-				frames_per_second = clamp(env_t::fps, 5u, 100u); // update it on the server to the current setting
+				frames_per_second = clamp(env_t::fps, env_t::min_fps, env_t::max_fps); // update it on the server to the current setting
 				frames_per_step = env_t::network_frames_per_step;
 			}
 			file->rdwr_long( frames_per_second );
@@ -904,7 +905,8 @@ void settings_t::rdwr(loadsave_t *file)
 		if(  file->is_version_atleast(122, 1)  ) {
 			file->rdwr_enum(climate_generator);
 			file->rdwr_byte(wind_direction);
-			file->rdwr_bool(departures_on_time);
+			bool dummy = true;
+			file->rdwr_bool(dummy /*was departures_on_time */);
 		}
 		else if( file->is_loading() ) {
 			climate_generator = HEIGHT_BASED;
@@ -917,13 +919,21 @@ void settings_t::rdwr(loadsave_t *file)
 				case 3: wind_direction = ribi_t::south; break;
 			}
 		}
+
+		if(  file->is_version_atleast(122, 2)  ) {
+			file->rdwr_bool(stop_halt_as_scheduled);
+		}
 		// otherwise the default values of the last one will be used
+	}
+	// sometimes broken savegames could have no legal direction for take off ...
+	if( !ribi_t::is_single( wind_direction ) ) {
+		wind_direction = ribi_t::west;
 	}
 }
 
 
 // read the settings from this file
-void settings_t::parse_simuconf( tabfile_t& simuconf, sint16& disp_width, sint16& disp_height, bool &fullscreen, std::string& objfilename )
+void settings_t::parse_simuconf( tabfile_t& simuconf, sint16& disp_width, sint16& disp_height, sint16 &fullscreen, std::string& objfilename )
 {
 	tabfileobj_t contents;
 
@@ -934,26 +944,28 @@ void settings_t::parse_simuconf( tabfile_t& simuconf, sint16& disp_width, sint16
 	for( int i = 0; i < LIGHT_COUNT; i++ ) {
 		char str[ 256 ];
 		sprintf( str, "special_color[%i]", i );
-		int *c = contents.get_ints( str );
-		if( c[ 0 ] >= 6 ) {
+		const vector_tpl<int> c = contents.get_ints( str );
+
+		if( c.get_count() >= 6 ) {
 			// now update RGB values
 			for( int j = 0; j < 3; j++ ) {
-				display_day_lights[ i * 3 + j ] = c[ j + 1 ];
+				display_day_lights[ i * 3 + j ] = c[ j ];
 			}
 			for( int j = 0; j < 3; j++ ) {
-				display_night_lights[ i * 3 + j ] = c[ j + 4 ];
+				display_night_lights[ i * 3 + j ] = c[ j + 3 ];
 			}
 		}
-		delete[] c;
 	}
 #endif
 
-	//check for fontname, must be a valid name!
-	const char *fname = contents.get_string( "fontname", env_t::fontname.c_str() );
-	if( FILE *f = fopen( fname, "r" ) ) {
+	// check for fontname, must be a valid name!
+	// will be only changed if default!
+	std::string fname = trim( contents.get_string( "fontname", env_t::fontname.c_str() ) );
+	if( FILE* f = fopen( fname.c_str(), "r" ) ) {
 		fclose( f );
 		env_t::fontname = fname;
 	}
+	env_t::fontsize  = contents.get_int( "fontsize", env_t::fontsize );
 
 	env_t::water_animation           = contents.get_int_clamped( "water_animation_ms",          env_t::water_animation,           0, INT_MAX);
 	env_t::ground_object_probability = contents.get_int_clamped( "random_grounds_probability",  env_t::ground_object_probability, 0, INT_MAX);
@@ -966,6 +978,7 @@ void settings_t::parse_simuconf( tabfile_t& simuconf, sint16& disp_width, sint16
 	env_t::ground_info    = contents.get_int( "ground_info",        env_t::ground_info    ) != 0;
 	env_t::townhall_info  = contents.get_int( "townhall_info",      env_t::townhall_info  ) != 0;
 	env_t::single_info    = contents.get_int( "only_single_info",   env_t::single_info    ) != 0;
+	env_t::single_line_gui = contents.get_int( "single_line_gui",  env_t::single_line_gui ) != 0;
 
 	env_t::compass_map_position    = contents.get_int( "compass_map_position",    env_t::compass_map_position );
 	env_t::compass_screen_position = contents.get_int( "compass_screen_position", env_t::compass_screen_position );
@@ -976,10 +989,10 @@ void settings_t::parse_simuconf( tabfile_t& simuconf, sint16& disp_width, sint16
 	env_t::window_frame_active       = contents.get_int( "window_frame_active",       env_t::window_frame_active       ) != 0;
 	env_t::second_open_closes_win    = contents.get_int( "second_open_closes_win",    env_t::second_open_closes_win    ) != 0;
 	env_t::remember_window_positions = contents.get_int( "remember_window_positions", env_t::remember_window_positions ) != 0;
-	env_t::menupos                   = contents.get_int("menubar_position",           env_t::menupos);
+	env_t::menupos                   = contents.get_int_clamped( "menubar_position",  env_t::menupos, 0, 3);
+	env_t::reselect_closes_tool      = contents.get_int( "reselect_closes_tool",      env_t::reselect_closes_tool ) != 0;
 
-	env_t::show_tooltips      = contents.get_int( "show_tooltips", env_t::show_tooltips   ) != 0;
-
+	env_t::show_tooltips      = contents.get_int(         "show_tooltips",      env_t::show_tooltips ) != 0;
 	env_t::tooltip_delay      = contents.get_int_clamped( "tooltip_delay",      env_t::tooltip_delay,      0, INT_MAX);
 	env_t::tooltip_duration   = contents.get_int_clamped( "tooltip_duration",   env_t::tooltip_duration,   0, INT_MAX);
 	env_t::toolbar_max_width  = contents.get_int_clamped( "toolbar_max_width",  env_t::toolbar_max_width,  0, INT_MAX);
@@ -1213,8 +1226,8 @@ void settings_t::parse_simuconf( tabfile_t& simuconf, sint16& disp_width, sint16
 	env_t::autosave = contents.get_int_clamped( "autosave", env_t::autosave, 0, INT_MAX );
 
 	// routing stuff
-	max_route_steps        = contents.get_int_clamped( "max_route_steps",        max_route_steps,        0, INT_MAX );
-	max_choose_route_steps = contents.get_int_clamped( "max_choose_route_steps", max_choose_route_steps, 0, INT_MAX );
+	max_route_steps        = contents.get_int_clamped( "max_route_steps",        max_route_steps,        1, INT_MAX );
+	max_choose_route_steps = contents.get_int_clamped( "max_choose_route_steps", max_choose_route_steps, 1, INT_MAX );
 	max_hops               = contents.get_int_clamped( "max_hops",               max_hops,               0, INT_MAX );
 	max_transfers          = contents.get_int_clamped( "max_transfers",          max_transfers,          0, INT_MAX );
 	bonus_basefactor       = contents.get_int_clamped( "bonus_basefactor",       bonus_basefactor,       0, 1000 );
@@ -1230,8 +1243,6 @@ void settings_t::parse_simuconf( tabfile_t& simuconf, sint16& disp_width, sint16
 	factory_arrival_periods              = contents.get_int_clamped( "factory_arrival_periods",      factory_arrival_periods,              1, 16 );
 	factory_maximum_intransit_percentage = contents.get_int_clamped( "maximum_intransit_percentage", factory_maximum_intransit_percentage, 0, 0x7FFF );
 	factory_enforce_demand               = contents.get_int( "factory_enforce_demand",       factory_enforce_demand ) != 0;
-
-	departures_on_time = contents.get_int("departures_on_time", departures_on_time ) != 0;
 
 	tourist_percentage = contents.get_int_clamped( "tourist_percentage", tourist_percentage, 0, 100 );
 
@@ -1276,21 +1287,24 @@ void settings_t::parse_simuconf( tabfile_t& simuconf, sint16& disp_width, sint16
 	for( int i = 0; i < 10; i++ ) {
 		char name[ 32 ];
 		sprintf( name, "starting_money[%i]", i );
-		sint64 *test = contents.get_sint64s( name );
-		if( (test[ 0 ] > 1) && (test[ 0 ] <= 3) ) {
+		const vector_tpl<sint64> test = contents.get_sint64s( name );
+
+		if( (test.get_count() > 1) && (test.get_count() <= 3) ) {
 			// insert sorted by years
 			int k = 0;
 			for( k = 0; k < i; k++ ) {
-				if( startingmoneyperyear[ k ].year > test[ 1 ] ) {
+				if( startingmoneyperyear[ k ].year > test[ 0 ] ) {
 					for( int l = j; l >= k; l-- )
 						memcpy( &startingmoneyperyear[ l + 1 ], &startingmoneyperyear[ l ], sizeof( yearmoney ) );
 					break;
 				}
 			}
-			startingmoneyperyear[ k ].year = (sint16)test[ 1 ];
-			startingmoneyperyear[ k ].money = test[ 2 ];
-			if( test[ 0 ] == 3 ) {
-				startingmoneyperyear[ k ].interpol = test[ 3 ] != 0;
+
+			startingmoneyperyear[ k ].year = (sint16)test[ 0 ];
+			startingmoneyperyear[ k ].money = test[ 1 ];
+
+			if( test.get_count() == 3 ) {
+				startingmoneyperyear[ k ].interpol = test[ 2 ] != 0;
 			}
 			else {
 				startingmoneyperyear[ k ].interpol = false;
@@ -1300,8 +1314,8 @@ void settings_t::parse_simuconf( tabfile_t& simuconf, sint16& disp_width, sint16
 		else {
 			// invalid entry
 		}
-		delete[] test;
 	}
+
 	// at least one found => use this now!
 	if( j > 0 && startingmoneyperyear[ 0 ].money > 0 ) {
 		starting_money = 0;
@@ -1322,32 +1336,37 @@ void settings_t::parse_simuconf( tabfile_t& simuconf, sint16& disp_width, sint16
 	for( int i = 0; i < 10; i++ ) {
 		char name[ 256 ];
 		sprintf( name, "locality_factor[%i]", i );
-		sint64 *test = contents.get_sint64s( name );
+
+		const vector_tpl<sint64> test = contents.get_sint64s( name );
+
 		// two arguments, and then factor natural number
-		if( test[ 0 ] == 2 ) {
-			if( test[ 2 ] <= 0 ) {
-				dbg->error( "Parameter in simuconf.tab wrong!", "locality_factor second value must be larger than zero!" );
-			}
-			else {
-				// insert sorted by years
-				int k = 0;
-				for( k = 0; k < i; k++ ) {
-					if( locality_factor_per_year[ k ].year > test[ 1 ] ) {
-						for( int l = j; l >= k; l-- )
-							memcpy( &locality_factor_per_year[ l + 1 ], &locality_factor_per_year[ l ], sizeof( yearly_locality_factor_t ) );
-						break;
-					}
-				}
-				locality_factor_per_year[ k ].year = (sint16)test[ 1 ];
-				locality_factor_per_year[ k ].factor = (uint32)test[ 2 ];
-				j++;
-			}
+		if( test.empty() ) {
+			continue;
+		}
+		else if( test.get_count() != 2 ) {
+			// invalid entry
+			dbg->warning("settings_t::parse_simuconf", "Parameter locality_factor[%i] has wrong syntax (Parameter ignored)", i);
+		}
+		else if( test[ 1 ] <= 0 ) {
+			dbg->warning("settings_t::parse_simuconf", "Parameter locality_factor[%i] second value must be larger than zero! (Parameter ignored)", i );
 		}
 		else {
-			// invalid entry
+			// insert sorted by years
+			int k = 0;
+			for( k = 0; k < i; k++ ) {
+				if( locality_factor_per_year[ k ].year > test[ 0 ] ) {
+					for( int l = j; l >= k; l-- )
+						memcpy( &locality_factor_per_year[ l + 1 ], &locality_factor_per_year[ l ], sizeof( yearly_locality_factor_t ) );
+					break;
+				}
+			}
+			locality_factor_per_year[ k ].year = (sint16)test[ 0 ];
+			locality_factor_per_year[ k ].factor = (uint32)test[ 1 ];
+			j++;
 		}
-		delete[] test;
+
 	}
+
 	// add default, if nothing found
 	if( j == 0 && locality_factor_per_year[ 0 ].factor == 0 ) {
 		locality_factor_per_year[ 0 ].year = 0;
@@ -1555,7 +1574,7 @@ void settings_t::parse_simuconf( tabfile_t& simuconf, sint16& disp_width, sint16
 	 */
 	disp_width  = contents.get_int_clamped("display_width",  disp_width,  0, 0x7FFF );
 	disp_height = contents.get_int_clamped("display_height", disp_height, 0, 0x7FFF );
-	fullscreen  = contents.get_int("fullscreen", fullscreen ) != 0;
+	fullscreen  = contents.get_int_clamped("fullscreen", fullscreen, 0, 2 );
 
 	with_private_paks = contents.get_int("with_private_paks", with_private_paks)!=0;
 
@@ -1567,6 +1586,8 @@ void settings_t::parse_simuconf( tabfile_t& simuconf, sint16& disp_width, sint16
 	// note: no need to check for min_height < max_height, since -12 < 16
 	world_maximum_height = contents.get_int_clamped("world_maximum_height", world_maximum_height, 16, 127);
 	world_minimum_height = contents.get_int_clamped("world_minimum_height", world_minimum_height, -127, -12);
+
+	stop_halt_as_scheduled = contents.get_int("stop_halt_as_scheduled", stop_halt_as_scheduled);
 
 	// Default pak file path
 	objfilename = ltrim(contents.get_string("pak_file_path", objfilename.c_str() ) );
